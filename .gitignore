@@ -1,0 +1,6 @@
+.vs/
+*.ipch
+*.vsidx
+x64/
+Debug/
+Release/

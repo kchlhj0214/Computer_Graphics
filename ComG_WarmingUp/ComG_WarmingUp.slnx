@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="ComG_WarmingUp/ComG_WarmingUp.vcxproj" Id="a1733263-e9af-4085-8937-9b90182ecf2d" />
+  <Project Path="ComG_WarmingUp2/ComG_WarmingUp2.vcxproj" Id="8f0dd58e-2841-4ce3-ba1a-14687d388fd9" />
+  <Project Path="ComG_WarmingUp3/ComG_WarmingUp3.vcxproj" Id="6a2c3b2e-717b-4651-9a6f-6ef0ad8c2493" />
+  <Project Path="ComG_WarmingUp4/ComG_WarmingUp4.vcxproj" Id="ed78dde1-326c-4b34-9859-798b6196cfe5" />
+</Solution>
