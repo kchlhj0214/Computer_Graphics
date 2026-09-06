@@ -68,7 +68,7 @@ void drawUI(const vector<double>& mat1, const vector<double>& mat2, bool eToggle
     cout << "\n\n";
 }
 
-// --- 여인수 전개(Cofactor Expansion) 기반 행렬식 계산 ---
+// --- 행렬식 계산 ---
 double getDeterminant(const vector<double>& mat, int n) {
     vector<vector<double>> a(n, vector<double>(n));
     for (int r = 0; r < n; ++r) {
@@ -78,10 +78,10 @@ double getDeterminant(const vector<double>& mat, int n) {
     }
 
     double det = 1.0;
-    int swapCount = 0; // 행 교환 횟수 기록 (행 교환 시 행렬식 부호가 반전됨)
+    int swapCount = 0; // 행 교환 횟수 기록
 
     for (int i = 0; i < n; ++i) {
-        // 1. 부분 피보팅(Partial Pivoting): i번째 열에서 절대값이 가장 큰 행을 찾음
+        // 1. 부분 피보팅: i번째 열에서 절대값이 가장 큰 행을 찾음
         int pivotRow = i;
         for (int j = i + 1; j < n; ++j) {
             if (abs(a[j][i]) > abs(a[pivotRow][i])) {
@@ -89,7 +89,7 @@ double getDeterminant(const vector<double>& mat, int n) {
             }
         }
 
-        // 피벗 원소가 0에 가까우면(선형 의존 관계) 행렬식은 0
+        // 피벗 원소가 0에 가까우면 행렬식은 0
         if (abs(a[pivotRow][i]) < 1e-9) {
             return 0.0;
         }
@@ -100,7 +100,7 @@ double getDeterminant(const vector<double>& mat, int n) {
             swapCount++; // 행 교환 시 부호 변경 카운트
         }
 
-        // 3. i번째 열의 하단 원소들을 0으로 소거 (상삼각행렬화)
+        // 3. i번째 열의 하단 원소들을 0으로 소거
         for (int j = i + 1; j < n; ++j) {
             double factor = a[j][i] / a[i][i];
             for (int k = i; k < n; ++k) {
@@ -112,7 +112,7 @@ double getDeterminant(const vector<double>& mat, int n) {
         det *= a[i][i];
     }
 
-    // 4. 행 교환 횟수가 홀수이면 부호를 반전 (-1 곱함)
+    // 4. 행 교환 횟수가 홀수이면 부호를 반전
     if (swapCount % 2 != 0) {
         det = -det;
     }
@@ -197,7 +197,6 @@ int main() {
             continue;
         }
 
-        // 명령어 수용 시 매번 화면을 초기화하고 상단 UI를 새로 그린 후, 그 아래에 연산 결과를 출력
         drawUI(mat1, mat2, eToggled, fToggled);
 
         switch (command) {
@@ -244,7 +243,7 @@ int main() {
             cout << "det(B^T) = " << getDeterminant(trans2, N) << "\n\n";
             break;
         }
-        case 'e': { // 행 최솟값 차감 토글
+        case 'e': { // 행 최솟값 차감
             if (!eToggled) {
                 origMat1 = mat1;
                 origMat2 = mat2;
@@ -261,7 +260,7 @@ int main() {
             drawUI(mat1, mat2, eToggled, fToggled);
             break;
         }
-        case 'f': { // 열 최댓값 가산 토글
+        case 'f': { // 열 최댓값 가산
             if (!fToggled) {
                 origMat1 = mat1;
                 origMat2 = mat2;
@@ -278,7 +277,7 @@ int main() {
             drawUI(mat1, mat2, eToggled, fToggled);
             break;
         }
-        case '+': { // 원본 행렬 모든 항 +1 (0~9 모듈러)
+        case '+': { // 원본 행렬 모든 항 +1
             for (int i = 0; i < N * N; ++i) {
                 mat1[i] = static_cast<int>(mat1[i] + 1) % 10;
                 mat2[i] = static_cast<int>(mat2[i] + 1) % 10;
@@ -287,7 +286,7 @@ int main() {
             cout << ">> 모든 항에 +1 연산이 적용되었습니다.\n\n";
             break;
         }
-        case '-': { // 원본 행렬 모든 항 -1 (0~9 모듈러)
+        case '-': { // 원본 행렬 모든 항 -1
             for (int i = 0; i < N * N; ++i) {
                 mat1[i] = static_cast<int>(mat1[i] - 1 + 10) % 10;
                 mat2[i] = static_cast<int>(mat2[i] - 1 + 10) % 10;
