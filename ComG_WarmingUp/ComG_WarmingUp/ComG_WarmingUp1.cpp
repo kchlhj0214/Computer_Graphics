@@ -60,10 +60,10 @@ void drawUI(const vector<double>& mat1, const vector<double>& mat2, bool eToggle
     printTwoMatrices(mat1, mat2);
 
     if (eToggled) {
-        cout << "[상태 안내] 'e' (행 최솟값 차감) 토글 중입니다. 해제하려면 'e'를 입력하세요.\n";
+        cout << "'e' (행 최솟값 차감) 토글 중입니다. 해제하려면 'e'를 입력하세요.\n";
     }
     else if (fToggled) {
-        cout << "[상태 안내] 'f' (열 최댓값 가산) 토글 중입니다. 해제하려면 'f'를 입력하세요.\n";
+        cout << "'f' (열 최댓값 가산) 토글 중입니다. 해제하려면 'f'를 입력하세요.\n";
     }
     cout << "\n\n";
 }
