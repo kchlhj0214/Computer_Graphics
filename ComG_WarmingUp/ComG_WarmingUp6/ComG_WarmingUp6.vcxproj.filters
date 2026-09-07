@@ -19,4 +19,24 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="data1.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="data2.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="data3.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="result1.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="result2.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="result3.txt">
+      <Filter>리소스 파일</Filter>
+    </None>
+  </ItemGroup>
 </Project>
