@@ -149,6 +149,9 @@
     <None Include="data1.txt" />
     <None Include="data2.txt" />
     <None Include="data3.txt" />
+    <None Include="data4.txt" />
+    <None Include="data5.txt" />
+    <None Include="data6.txt" />
     <None Include="result1.txt" />
     <None Include="result2.txt" />
     <None Include="result3.txt" />
