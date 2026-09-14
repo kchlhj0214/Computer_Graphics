@@ -3,8 +3,8 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="ComG_1/ComG_1.vcxproj" />
-  <Project Path="ComG_1_1/ComG_1_1.vcxproj" />
-  <Project Path="ComG_1_2/ComG_1_2.vcxproj" />
-  <Project Path="ComG_1_3/ComG_1_3.vcxproj" />
+  <Project Path="ComG_1/ComG_1.vcxproj" Id="a67f2e6b-40bd-4400-83a2-4a09c66440ef" />
+  <Project Path="ComG_1_1/ComG_1_1.vcxproj" Id="9b4da955-5cbb-4788-9be5-6ff3399a5624" />
+  <Project Path="ComG_1_2/ComG_1_2.vcxproj" Id="7c565fbb-77ef-431f-bd9c-c987569ddb96" />
+  <Project Path="ComG_1_3/ComG_1_3.vcxproj" Id="51be136c-97a5-404e-bb3c-0556891593d5" />
 </Solution>
