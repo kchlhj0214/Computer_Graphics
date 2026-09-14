@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="ComG_1/ComG_1.vcxproj" />
+  <Project Path="ComG_1_1/ComG_1_1.vcxproj" />
+  <Project Path="ComG_1_2/ComG_1_2.vcxproj" />
+  <Project Path="ComG_1_3/ComG_1_3.vcxproj" />
+</Solution>
