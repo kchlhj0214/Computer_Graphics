@@ -146,7 +146,6 @@ void InputProcess(GLFWwindow* window) {
     if (currentLeft && !previousLeft) SelectSquare(window);
     previousLeft = currentLeft;
 
-    // 일반 키보드의 +는 Shift와 = 조합, 숫자패드 +/-도 지원
     bool equalPressed = KeyPressed(window, GLFW_KEY_EQUAL);
     bool addPressed = KeyPressed(window, GLFW_KEY_KP_ADD);
     bool minusPressed = KeyPressed(window, GLFW_KEY_MINUS);
