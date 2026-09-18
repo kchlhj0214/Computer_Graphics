@@ -11,17 +11,15 @@
 #define WINDOW_HEIGHT 1200
 #define WINDOW_MIN_WIDTH 300
 #define WINDOW_MIN_HEIGHT 300
-#define MOVE_STEP 2.0f
-#define TIMER_INTERVAL_MS 1
-#define SIZE_STEP 2.0f
+#define MOVE_STEP 1.0f
+#define TIMER_INTERVAL_MS 2
+#define SIZE_STEP 1.0f
 #define RECT_MIN_SIZE 50.0f
 #define RECT_MAX_SIZE 150.0f
 #define ZIGZAG_VERTICAL_DISTANCE 100.0f
 #define MAX_RECTS 5
 #define COLOR_MIN 0.10f
 #define COLOR_MAX 0.90f
-
-static_assert(MOVE_STEP > 0 && SIZE_STEP > 0 && TIMER_INTERVAL_MS > 0);
 
 using namespace std;
 
@@ -118,9 +116,6 @@ int main() {
     glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
     glfwSetWindowRefreshCallback(window, RefreshCallback);
     glfwSetWindowIconifyCallback(window, IconifyCallback);
-    cout << "1-4: 1200x1200, minimum 300x300, max 5 rectangles\n"
-        << "1: diagonal / 2: zigzag / 3: edge (reset size to 50x50)\n"
-        << "4: size / 5: color once / s: stop / m: return / r: clear / q: quit\n";
     nextTick = glfwGetTime() + timerInterval;
 
     //--- 메인 루프
@@ -186,7 +181,7 @@ void InputProcess(GLFWwindow* window) {
 void TimerFunction() {
     double now = glfwGetTime();
     if (minimized) { nextTick = now + timerInterval; return; }
-    // OS가 창 드래그 등으로 오래 멈춘 경우 밀린 이동을 한꺼번에 하지 않는다.
+
     if (now - nextTick > 0.1) nextTick = now;
     while (now >= nextTick) {
         UpdateAnimation();
@@ -284,9 +279,15 @@ void ToggleMotion(Motion next) {
     if (next == Motion::Zigzag && !resume)
         for (int i = 0; i < rectangleCount; ++i) rectangles[i].zigzagVertical = false;
 }
-void StopAnimations() { pausedMotion = motion; motion = Motion::None; resizing = false; }
-void ReturnHome() { motion = Motion::Return; pausedMotion = Motion::None; }
-void ClearRectangles() { rectangleCount = 0; motion = pausedMotion = Motion::None; resizing = edgeRunning = false; }
+void StopAnimations() { 
+    pausedMotion = motion; motion = Motion::None; resizing = false;
+}
+void ReturnHome() { 
+    motion = Motion::Return; pausedMotion = Motion::None; 
+}
+void ClearRectangles() { 
+    rectangleCount = 0; motion = pausedMotion = Motion::None; resizing = edgeRunning = false; 
+}
 void ToggleSize() {
     if (motion != Motion::Edge) {
         resizing = !resizing;
