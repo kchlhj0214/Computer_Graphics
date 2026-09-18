@@ -7,4 +7,7 @@
   <Project Path="ComG_1_1/ComG_1_1.vcxproj" Id="9b4da955-5cbb-4788-9be5-6ff3399a5624" />
   <Project Path="ComG_1_2/ComG_1_2.vcxproj" Id="7c565fbb-77ef-431f-bd9c-c987569ddb96" />
   <Project Path="ComG_1_3/ComG_1_3.vcxproj" Id="51be136c-97a5-404e-bb3c-0556891593d5" />
+  <Project Path="ComG_1_4/ComG_1_4.vcxproj" Id="a6cb4a91-d5f5-4a25-87ff-f28244abb39c" />
+  <Project Path="ComG_1_5/ComG_1_5.vcxproj" Id="15c068da-0b14-43b9-b97f-eba6040b3b1f" />
+  <Project Path="ComG_1_6/ComG_1_6.vcxproj" Id="0dc5dc88-7114-4b3e-bdc0-2afcd5851258" />
 </Solution>
