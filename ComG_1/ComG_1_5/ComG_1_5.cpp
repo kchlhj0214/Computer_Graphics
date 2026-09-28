@@ -38,6 +38,7 @@ struct Rectangle {
 //--- 전역 상태
 vector<Rectangle> rectangles;
 Rectangle eraser;
+float eraserBaseSize = ERASER_SIZE;
 int initialTarget = 0, initialCreated = 0, addedCount = 0;
 float windowWidth = WINDOW_WIDTH, windowHeight = WINDOW_HEIGHT;
 bool erasing = false;
@@ -47,7 +48,7 @@ mt19937 g(rd());
 
 //--- 함수 선언
 void ResetScene();
-void AddRectangle(float x, float y);
+bool AddRectangle(float x, float y);
 void ClampRectangle(Rectangle& r);
 void InputProcess(GLFWwindow* window);
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
@@ -112,7 +113,8 @@ void ResetScene() {
     initialTarget = uid_count(g);
     erasing = false;
     eraser = Rectangle{};
-    eraser.size = ERASER_SIZE;
+    eraserBaseSize = ERASER_SIZE;
+    eraser.size = eraserBaseSize;
     nextSpawn = glfwGetTime() + SPAWN_INTERVAL;
 }
 
@@ -122,14 +124,15 @@ void ClampRectangle(Rectangle& r) {
 }
 
 //--- 자동 생성과 우클릭 생성의 공통 처리
-void AddRectangle(float x, float y) {
-    if (rectangles.size() >= INITIAL_MAX_RECTS + MAX_ADDED_RECTS) return;
+bool AddRectangle(float x, float y) {
+    if (rectangles.size() >= INITIAL_MAX_RECTS + MAX_ADDED_RECTS) return false;
     Rectangle r;
     r.x = x; r.y = y;
     uniform_real_distribution<float> urd_rgb{ COLOR_MIN, COLOR_MAX };
     r.color = { urd_rgb(g), urd_rgb(g), urd_rgb(g) };
     ClampRectangle(r);
     rectangles.push_back(r);
+    return true;
 }
 
 void InputProcess(GLFWwindow* window) {
@@ -148,7 +151,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int) {
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
             erasing = true;
-            eraser.size = ERASER_SIZE;
+            eraser.size = eraserBaseSize;
             eraser.color = { 0, 0, 0 };
             UpdateScene(window);
         }
@@ -160,10 +163,13 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int) {
     else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS &&
         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE &&
         addedCount < MAX_ADDED_RECTS) {
-        AddRectangle(static_cast<float>(mouseX), static_cast<float>(mouseY));
-        ++addedCount;
-        // 지우개는 숨겨진 상태이며, 다음 좌클릭 시 초기 크기로 돌아간다.
-        eraser.size = max(RECT_SIZE, eraser.size - ERASER_SIZE_STEP);
+        // 실제 생성에 성공했을 때만 시작 크기를 줄인다. 10회 후 RECT_SIZE가 된다.
+        if (AddRectangle(static_cast<float>(mouseX), static_cast<float>(mouseY))) {
+            ++addedCount;
+            eraserBaseSize = max(RECT_SIZE, ERASER_SIZE -
+                (ERASER_SIZE - RECT_SIZE) * addedCount / MAX_ADDED_RECTS);
+            eraser.size = eraserBaseSize;
+        }
     }
 }
 
