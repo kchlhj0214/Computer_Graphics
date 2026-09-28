@@ -1,4 +1,4 @@
-// 링커 -> 입력 -> 추가 종속성: opengl32.lib; glew32.lib; glfw3.lib
+// 링커 -> 입력 -> 추가 종속성: opengl32.lib glew32.lib glfw3.lib
 #include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <iostream>
