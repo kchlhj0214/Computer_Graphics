@@ -172,6 +172,11 @@ void AddSlot(PieceType type,float x,float y,float angle,int board) { slots.push_
 
 void InitScene()
 {
+	pieces.clear();
+	slots.clear();
+	for (Board& board : boards) board.completed = false;
+	dragging = -1;
+	rotationTimer = 0.0;
 	sourcePieces = { {SQUARE,260,140,0},{RECTANGLE,260,350,0},
 		{EQUILATERAL,260,560,0},{HALF_TRIANGLE,260,770,0},
 		{PENTAGON,260,1010,180} };
@@ -287,5 +292,6 @@ void MouseCallback(GLFWwindow* window,int button,int action,int)
 
 void KeyCallback(GLFWwindow* window,int key,int,int action,int)
 {
+	if(action==GLFW_PRESS&&key==GLFW_KEY_R)InitScene();
 	if(action==GLFW_PRESS&&(key==GLFW_KEY_Q||key==GLFW_KEY_ESCAPE))glfwSetWindowShouldClose(window,true);
 }
