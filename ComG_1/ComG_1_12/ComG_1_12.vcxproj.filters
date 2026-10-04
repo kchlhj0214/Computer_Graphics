@@ -13,10 +13,17 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="셰이더 파일">
+      <UniqueIdentifier>{FFCA09CD-86D4-4719-9AB1-4F3354C13427}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ComG_1_12.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="vertex.glsl"><Filter>셰이더 파일</Filter></None>
+    <None Include="fragment.glsl"><Filter>셰이더 파일</Filter></None>
   </ItemGroup>
 </Project>
