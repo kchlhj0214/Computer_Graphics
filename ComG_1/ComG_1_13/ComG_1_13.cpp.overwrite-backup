@@ -1,0 +1,346 @@
+﻿#include <GL/glew.h>
+#include <GL/glfw3.h>
+#include <gl/glm/glm.hpp>
+#include <gl/glm/ext.hpp>
+#include <gl/glm/gtc/matrix_transform.hpp>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <random>
+#include <algorithm>
+#include <cmath>
+
+using namespace std;
+
+#define WINDOW_WIDTH 1600
+#define WINDOW_HEIGHT 1200
+#define SPACE_TOP 100.0f
+#define SPACE_WIDTH 200.0f
+#define SPACE_HEIGHT 1000.0f
+#define FIRST_SPACE_LEFT 100.0f
+#define SECOND_SPACE_LEFT 400.0f
+#define MOVING_RECT_WIDTH 150.0f
+#define MOVING_RECT_HEIGHT 50.0f
+#define MATCH_AREA_LEFT 50.0f
+#define MATCH_AREA_TOP 500.0f
+#define MATCH_AREA_WIDTH 600.0f
+#define MATCH_AREA_HEIGHT 200.0f
+#define STACK_RIGHT 1400.0f
+#define STACK_BOTTOM 1100.0f
+#define STACK_TOP 100.0f
+#define SPEED_MIN 100.0f
+#define SPEED_MAX 200.0f
+#define SPEED_STEP 10.0f
+#define STACK_MOVE_SPEED 1000.0f
+#define COLOR_MIN 0.10f
+#define COLOR_MAX 0.90f
+#define DASH_LENGTH 15.0f
+#define DASH_GAP 10.0f
+
+struct Vec2 { float x, y; };
+struct Color { float r, g, b; };
+struct MovingRectangle {
+	float x, y, speed, direction;
+	float targetX, targetY;
+	Color color;
+};
+struct StackedRectangle { float x, y; Color color; };
+enum SceneState { VERTICAL_MOVE, MOVE_FIRST, MOVE_SECOND };
+
+MovingRectangle rectangles[2];
+vector<StackedRectangle> stackedRectangles;
+SceneState sceneState = VERTICAL_MOVE;
+int stackCount = 0;
+double previousTime = 0.0;
+mt19937 generator(random_device{}());
+
+GLuint shaderProgramID = 0, vao = 0, vbo = 0;
+GLint offsetLocation = -1, windowLocation = -1, colorLocation = -1;
+
+string ReadFile(const char* name);
+bool InitShader();
+void InitBuffer();
+void ResetScene();
+void CreateNewPair();
+Vec2 GetStackPosition(int index);
+bool BothInsideMatchArea();
+bool MoveToward(MovingRectangle& rectangle, float deltaTime);
+void UpdateScene();
+void Upload(const vector<Vec2>& vertices);
+void DrawRectangle(float left, float top, float width, float height, Color color, bool fill);
+void AddDashedSegment(vector<Vec2>& lines, Vec2 start, Vec2 end);
+void DrawMatchArea();
+void DrawScene();
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+int main()
+{
+	if (!glfwInit()) return -1;
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	GLFWwindow* window = glfwCreateWindow(
+		WINDOW_WIDTH, WINDOW_HEIGHT, "1-12 Rectangle Matching", nullptr, nullptr);
+	if (!window) { glfwTerminate(); return -1; }
+	glfwMakeContextCurrent(window);
+	glewExperimental = GL_TRUE;
+	if (glewInit() != GLEW_OK) { glfwTerminate(); return -1; }
+	glfwSwapInterval(1);
+	glfwSetKeyCallback(window, KeyCallback);
+	glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+	if (!InitShader()) { glfwTerminate(); return -1; }
+	InitBuffer();
+	ResetScene();
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+		UpdateScene();
+		DrawScene();
+		glfwSwapBuffers(window);
+	}
+	glDeleteBuffers(1, &vbo);
+	glDeleteVertexArrays(1, &vao);
+	glDeleteProgram(shaderProgramID);
+	glfwDestroyWindow(window);
+	glfwTerminate();
+	return 0;
+}
+
+string ReadFile(const char* name)
+{
+	ifstream file(name);
+	if (!file) { cerr << "ERROR: 셰이더 파일을 열 수 없습니다: " << name << endl; return ""; }
+	stringstream stream; stream << file.rdbuf(); return stream.str();
+}
+
+bool InitShader()
+{
+	string sources[2] = { ReadFile("vertex.glsl"), ReadFile("fragment.glsl") };
+	if (sources[0].empty() || sources[1].empty()) return false;
+	GLuint shaders[2] = { glCreateShader(GL_VERTEX_SHADER), glCreateShader(GL_FRAGMENT_SHADER) };
+	for (int i = 0; i < 2; ++i) {
+		const char* code = sources[i].c_str();
+		glShaderSource(shaders[i], 1, &code, nullptr);
+		glCompileShader(shaders[i]);
+		GLint result; glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &result);
+		if (!result) {
+			GLchar log[1024]; glGetShaderInfoLog(shaders[i], 1024, nullptr, log);
+			cerr << "ERROR: shader 컴파일 실패\n" << log << endl; return false;
+		}
+	}
+	shaderProgramID = glCreateProgram();
+	glAttachShader(shaderProgramID, shaders[0]);
+	glAttachShader(shaderProgramID, shaders[1]);
+	glLinkProgram(shaderProgramID);
+	GLint result; glGetProgramiv(shaderProgramID, GL_LINK_STATUS, &result);
+	if (!result) {
+		GLchar log[1024]; glGetProgramInfoLog(shaderProgramID, 1024, nullptr, log);
+		cerr << "ERROR: shader program 링크 실패\n" << log << endl; return false;
+	}
+	glDeleteShader(shaders[0]); glDeleteShader(shaders[1]);
+	offsetLocation = glGetUniformLocation(shaderProgramID, "uOffset");
+	windowLocation = glGetUniformLocation(shaderProgramID, "uWindowSize");
+	colorLocation = glGetUniformLocation(shaderProgramID, "uColor");
+	return offsetLocation >= 0 && windowLocation >= 0 && colorLocation >= 0;
+}
+
+void InitBuffer()
+{
+	glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo);
+	glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vec2), nullptr);
+	glEnableVertexAttribArray(0); glBindVertexArray(0);
+}
+
+void CreateNewPair()
+{
+	uniform_int_distribution<int> speedStep(0, 10);
+	uniform_real_distribution<float> color(COLOR_MIN, COLOR_MAX);
+	float centers[2] = { FIRST_SPACE_LEFT + SPACE_WIDTH / 2.0f,
+		SECOND_SPACE_LEFT + SPACE_WIDTH / 2.0f };
+	for (int i = 0; i < 2; ++i) {
+		rectangles[i].x = centers[i];
+		rectangles[i].y = SPACE_TOP + SPACE_HEIGHT / 2.0f;
+		rectangles[i].speed = SPEED_MIN + speedStep(generator) * SPEED_STEP;
+		rectangles[i].direction = i == 0 ? -1.0f : 1.0f;
+		rectangles[i].color = { color(generator), color(generator), color(generator) };
+	}
+	sceneState = VERTICAL_MOVE;
+}
+
+void ResetScene()
+{
+	stackedRectangles.clear();
+	stackCount = 0;
+	CreateNewPair();
+	previousTime = glfwGetTime();
+}
+
+Vec2 GetStackPosition(int index)
+{
+	const int levelCount = static_cast<int>((STACK_BOTTOM - STACK_TOP) /
+		MOVING_RECT_HEIGHT);
+	int level = index % levelCount;
+	return { STACK_RIGHT - MOVING_RECT_WIDTH / 2.0f,
+		STACK_BOTTOM - MOVING_RECT_HEIGHT / 2.0f - level * MOVING_RECT_HEIGHT };
+}
+
+bool BothInsideMatchArea()
+{
+	float left = MATCH_AREA_LEFT;
+	float right = MATCH_AREA_LEFT + MATCH_AREA_WIDTH;
+	float top = MATCH_AREA_TOP;
+	float bottom = MATCH_AREA_TOP + MATCH_AREA_HEIGHT;
+	for (const MovingRectangle& rectangle : rectangles) {
+		if (rectangle.x - MOVING_RECT_WIDTH / 2.0f < left ||
+			rectangle.x + MOVING_RECT_WIDTH / 2.0f > right ||
+			rectangle.y - MOVING_RECT_HEIGHT / 2.0f < top ||
+			rectangle.y + MOVING_RECT_HEIGHT / 2.0f > bottom)
+			return false;
+	}
+	return true;
+}
+
+bool MoveToward(MovingRectangle& rectangle, float deltaTime)
+{
+	float dx = rectangle.targetX - rectangle.x;
+	float dy = rectangle.targetY - rectangle.y;
+	float distance = sqrt(dx * dx + dy * dy);
+	float movement = STACK_MOVE_SPEED * deltaTime;
+	if (distance <= movement || distance < 0.001f) {
+		rectangle.x = rectangle.targetX;
+		rectangle.y = rectangle.targetY;
+		return true;
+	}
+	rectangle.x += dx / distance * movement;
+	rectangle.y += dy / distance * movement;
+	return false;
+}
+
+void UpdateScene()
+{
+	double now = glfwGetTime();
+	float deltaTime = min(static_cast<float>(now - previousTime), 0.05f);
+	previousTime = now;
+	if (sceneState == VERTICAL_MOVE) {
+		float minimumY = SPACE_TOP + MOVING_RECT_HEIGHT / 2.0f;
+		float maximumY = SPACE_TOP + SPACE_HEIGHT - MOVING_RECT_HEIGHT / 2.0f;
+		for (MovingRectangle& rectangle : rectangles) {
+			rectangle.y += rectangle.direction * rectangle.speed * deltaTime;
+			if (rectangle.y < minimumY) {
+				rectangle.y = minimumY;
+				rectangle.direction = 1.0f;
+			}
+			else if (rectangle.y > maximumY) {
+				rectangle.y = maximumY;
+				rectangle.direction = -1.0f;
+			}
+		}
+	}
+	else if (sceneState == MOVE_FIRST && MoveToward(rectangles[0], deltaTime)) {
+		stackedRectangles.push_back({ rectangles[0].x, rectangles[0].y, rectangles[0].color });
+		++stackCount;
+		rectangles[1].targetX = GetStackPosition(stackCount).x;
+		rectangles[1].targetY = GetStackPosition(stackCount).y;
+		sceneState = MOVE_SECOND;
+	}
+	else if (sceneState == MOVE_SECOND && MoveToward(rectangles[1], deltaTime)) {
+		stackedRectangles.push_back({ rectangles[1].x, rectangles[1].y, rectangles[1].color });
+		++stackCount;
+		CreateNewPair();
+	}
+}
+
+void Upload(const vector<Vec2>& vertices)
+{
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vec2),
+		vertices.data(), GL_DYNAMIC_DRAW);
+}
+
+void DrawRectangle(float left, float top, float width, float height, Color color, bool fill)
+{
+	vector<Vec2> vertices = { {0,0},{width,0},{width,height},{0,height} };
+	Upload(vertices);
+	glUniform2f(offsetLocation, left, top);
+	if (fill) {
+		glUniform3f(colorLocation, color.r, color.g, color.b);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+	}
+	glUniform3f(colorLocation, 0, 0, 0);
+	glLineWidth(1.0f);
+	glDrawArrays(GL_LINE_LOOP, 0, 4);
+}
+
+void AddDashedSegment(vector<Vec2>& lines, Vec2 start, Vec2 end)
+{
+	float dx = end.x - start.x, dy = end.y - start.y;
+	float length = sqrt(dx * dx + dy * dy);
+	float ux = dx / length, uy = dy / length;
+	for (float distance = 0; distance < length; distance += DASH_LENGTH + DASH_GAP) {
+		float dashEnd = min(distance + DASH_LENGTH, length);
+		lines.push_back({ start.x + ux * distance, start.y + uy * distance });
+		lines.push_back({ start.x + ux * dashEnd, start.y + uy * dashEnd });
+	}
+}
+
+void DrawMatchArea()
+{
+	Vec2 p0 = { MATCH_AREA_LEFT, MATCH_AREA_TOP };
+	Vec2 p1 = { MATCH_AREA_LEFT + MATCH_AREA_WIDTH, MATCH_AREA_TOP };
+	Vec2 p2 = { MATCH_AREA_LEFT + MATCH_AREA_WIDTH, MATCH_AREA_TOP + MATCH_AREA_HEIGHT };
+	Vec2 p3 = { MATCH_AREA_LEFT, MATCH_AREA_TOP + MATCH_AREA_HEIGHT };
+	vector<Vec2> lines;
+	AddDashedSegment(lines, p0, p1); AddDashedSegment(lines, p1, p2);
+	AddDashedSegment(lines, p2, p3); AddDashedSegment(lines, p3, p0);
+	Upload(lines);
+	glUniform2f(offsetLocation, 0, 0);
+	glUniform3f(colorLocation, 0, 0, 0);
+	glLineWidth(1.0f);
+	glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lines.size()));
+}
+
+void DrawScene()
+{
+	glClearColor(1, 1, 1, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glUseProgram(shaderProgramID);
+	glUniform2f(windowLocation, WINDOW_WIDTH, WINDOW_HEIGHT);
+	glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	DrawRectangle(FIRST_SPACE_LEFT, SPACE_TOP, SPACE_WIDTH, SPACE_HEIGHT, { 0,0,0 }, false);
+	DrawRectangle(SECOND_SPACE_LEFT, SPACE_TOP, SPACE_WIDTH, SPACE_HEIGHT, { 0,0,0 }, false);
+	DrawMatchArea();
+	for (const StackedRectangle& rectangle : stackedRectangles)
+		DrawRectangle(rectangle.x - MOVING_RECT_WIDTH / 2.0f,
+			rectangle.y - MOVING_RECT_HEIGHT / 2.0f,
+			MOVING_RECT_WIDTH, MOVING_RECT_HEIGHT, rectangle.color, true);
+	int firstVisible = sceneState == MOVE_SECOND ? 1 : 0;
+	for (int i = firstVisible; i < 2; ++i)
+		DrawRectangle(rectangles[i].x - MOVING_RECT_WIDTH / 2.0f,
+			rectangles[i].y - MOVING_RECT_HEIGHT / 2.0f,
+			MOVING_RECT_WIDTH, MOVING_RECT_HEIGHT, rectangles[i].color, true);
+	glBindVertexArray(0);
+}
+
+void KeyCallback(GLFWwindow* window, int key, int, int action, int)
+{
+	if (action != GLFW_PRESS) return;
+	if (key == GLFW_KEY_ENTER && sceneState == VERTICAL_MOVE && BothInsideMatchArea()) {
+		Vec2 target = GetStackPosition(stackCount);
+		rectangles[0].targetX = target.x;
+		rectangles[0].targetY = target.y;
+		sceneState = MOVE_FIRST;
+	}
+	else if (key == GLFW_KEY_A && sceneState == VERTICAL_MOVE)
+		rectangles[0].speed = min(rectangles[0].speed + SPEED_STEP, SPEED_MAX);
+	else if (key == GLFW_KEY_S && sceneState == VERTICAL_MOVE)
+		rectangles[0].speed = max(rectangles[0].speed - SPEED_STEP, SPEED_MIN);
+	else if (key == GLFW_KEY_D && sceneState == VERTICAL_MOVE)
+		rectangles[1].speed = min(rectangles[1].speed + SPEED_STEP, SPEED_MAX);
+	else if (key == GLFW_KEY_F && sceneState == VERTICAL_MOVE)
+		rectangles[1].speed = max(rectangles[1].speed - SPEED_STEP, SPEED_MIN);
+	else if (key == GLFW_KEY_R) ResetScene();
+	else if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)
+		glfwSetWindowShouldClose(window, true);
+}
