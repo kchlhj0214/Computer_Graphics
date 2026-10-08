@@ -8,9 +8,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <vector>
-#include <random>
-#include <algorithm>
 using namespace std;
 
 #define WINDOW_WIDTH 1200
@@ -25,19 +22,6 @@ using namespace std;
 #define CAMERA_Z 4.0f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
-#define OBJECT_SIZE 0.8f
-#define OBJECT_ROTATE_X 30.0f
-#define OBJECT_ROTATE_Y 30.0f
-
-enum ObjectType { NONE, CUBE, PYRAMID };
-ObjectType objectType = NONE;
-bool visibleFaces[6] = {};
-mt19937 generator(random_device{}());
-GLuint objectVao = 0, objectVbo = 0;
-glm::vec3 faceColors[6] = {
-	{0.90f,0.10f,0.90f}, {0.90f,0.90f,0.10f}, {0.10f,0.90f,0.90f},
-	{0.10f,0.90f,0.10f}, {0.90f,0.10f,0.10f}, {0.10f,0.10f,0.90f}
-};
 
 glm::vec3 cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
 float cameraRadius = glm::length(cameraPosition);
@@ -54,7 +38,6 @@ bool InitShader();
 void DrawScene();
 void MouseCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorCallback(GLFWwindow* window, double x, double y);
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 int main()
 {
@@ -71,7 +54,6 @@ int main()
 	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
 	glfwSetMouseButtonCallback(window, MouseCallback);
 	glfwSetCursorPosCallback(window, CursorCallback);
-	glfwSetKeyCallback(window, KeyCallback);
 	float vertices[] = {
 		-AXIS_LENGTH,0,0, AXIS_LENGTH,0,0,
 		0,-AXIS_LENGTH,0, 0,AXIS_LENGTH,0,
@@ -81,24 +63,6 @@ int main()
 	glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-	glEnableVertexAttribArray(0); glBindVertexArray(0);
-	// Cube: +Z, -Z, -X, +X, +Y, -Y. Pyramid: +Z, +X, -Z, -X, bottom.
-	glm::vec3 corners[9] = {
-		{-0.5f,-0.5f,0.5f},{0.5f,-0.5f,0.5f},{0.5f,0.5f,0.5f},{-0.5f,0.5f,0.5f},
-		{-0.5f,-0.5f,-0.5f},{0.5f,-0.5f,-0.5f},{0.5f,0.5f,-0.5f},{-0.5f,0.5f,-0.5f},
-		{0,0.5f,0}
-	};
-	int indices[] = {
-		0,1,2, 0,2,3, 5,4,7, 5,7,6, 4,0,3, 4,3,7,
-		1,5,6, 1,6,2, 3,2,6, 3,6,7, 4,5,1, 4,1,0,
-		0,1,8, 1,5,8, 5,4,8, 4,0,8, 4,5,1, 4,1,0
-	};
-	vector<glm::vec3> objectVertices;
-	for (int index : indices) objectVertices.push_back(corners[index]);
-	glGenVertexArrays(1, &objectVao); glGenBuffers(1, &objectVbo);
-	glBindVertexArray(objectVao); glBindBuffer(GL_ARRAY_BUFFER, objectVbo);
-	glBufferData(GL_ARRAY_BUFFER, objectVertices.size() * sizeof(glm::vec3), objectVertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
 	glEnableVertexAttribArray(0); glBindVertexArray(0);
 	qobj = gluNewQuadric();
 	if (!qobj) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
@@ -114,7 +78,6 @@ int main()
 		DrawScene(); glfwSwapBuffers(window);
 	}
 	gluDeleteQuadric(qobj);
-	glDeleteBuffers(1, &objectVbo); glDeleteVertexArrays(1, &objectVao);
 	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
 	glfwDestroyWindow(window); glfwTerminate(); return 0;
 }
@@ -173,47 +136,6 @@ void DrawScene()
 		glUniform3fv(colorLocation, 1, glm::value_ptr(colors[i]));
 		gluSphere(qobj, SPHERE_RADIUS, SPHERE_SLICES, SPHERE_STACKS);
 	}
-	// Applied to vertices from right to left: scale, X rotation, Y rotation.
-	model = glm::mat4(1.0f);
-	model = glm::rotate(model, glm::radians(OBJECT_ROTATE_Y), glm::vec3(0,1,0));
-	model = glm::rotate(model, glm::radians(OBJECT_ROTATE_X), glm::vec3(1,0,0));
-	model = glm::scale(model, glm::vec3(OBJECT_SIZE));
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-	glBindVertexArray(objectVao);
-	int faceCount = objectType == CUBE ? 6 : (objectType == PYRAMID ? 5 : 0);
-	for (int i = 0; i < faceCount; ++i) {
-		if (!visibleFaces[i]) continue;
-		glUniform3fv(colorLocation, 1, glm::value_ptr(faceColors[i]));
-		int first = objectType == CUBE ? i * 6 : 36 + i * 3;
-		int count = objectType == CUBE || i == 4 ? 6 : 3;
-		glDrawArrays(GL_TRIANGLES, first, count);
-	}
-	glBindVertexArray(0);
-}
-
-void KeyCallback(GLFWwindow*, int key, int, int action, int)
-{
-	if (action != GLFW_PRESS) return;
-	ObjectType selected = NONE;
-	int face = -1;
-	if (key >= GLFW_KEY_1 && key <= GLFW_KEY_6) { selected = CUBE; face = key - GLFW_KEY_1; }
-	else if (key >= GLFW_KEY_7 && key <= GLFW_KEY_9) { selected = PYRAMID; face = key - GLFW_KEY_7; }
-	else if (key == GLFW_KEY_0) { selected = PYRAMID; face = 3; }
-	else if (key == GLFW_KEY_C) selected = CUBE;
-	else if (key == GLFW_KEY_T) selected = PYRAMID;
-	if (selected == NONE) return;
-	if (objectType != selected) {
-		fill(visibleFaces, visibleFaces + 6, false);
-		objectType = selected;
-	}
-	if (face >= 0) { visibleFaces[face] = !visibleFaces[face]; return; }
-	vector<int> hiddenFaces;
-	int count = selected == CUBE ? 6 : 4;
-	for (int i = 0; i < count; ++i) if (!visibleFaces[i]) hiddenFaces.push_back(i);
-	shuffle(hiddenFaces.begin(), hiddenFaces.end(), generator);
-	int additions = selected == CUBE ? 2 : 1;
-	for (int i = 0; i < additions && i < (int)hiddenFaces.size(); ++i) visibleFaces[hiddenFaces[i]] = true;
-	if (selected == PYRAMID) visibleFaces[4] = true;
 }
 
 void MouseCallback(GLFWwindow* window, int button, int action, int)
