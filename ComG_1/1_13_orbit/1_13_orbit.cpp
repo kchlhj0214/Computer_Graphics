@@ -13,9 +13,10 @@ using namespace std;
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
 #define AXIS_LENGTH 1.0f
-#define SPHERE_RADIUS 0.0225f
-#define SPHERE_SLICES 24
-#define SPHERE_STACKS 16
+#define CONE_RADIUS 0.0225f
+#define CONE_HEIGHT (CONE_RADIUS * 2.0f)
+#define CONE_SLICES 24
+#define CONE_STACKS 16
 #define VIEW_RANGE 1.35f
 #define CAMERA_X 3.0f
 #define CAMERA_Y 2.4f
@@ -44,7 +45,7 @@ int main()
 	if (!glfwInit()) return -1;
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	// gluSphere submits legacy vertices; the shader still transforms them.
+	// GLU submits legacy vertices; the shader still transforms them.
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "1-13 XYZ Axes", nullptr, nullptr);
@@ -132,9 +133,17 @@ void DrawScene()
 	for (int i = 0; i < 3; ++i) {
 		model = glm::mat4(1.0f);
 		model = glm::translate(model, ends[i]);
+		// GLU cones point along local +Z; align it with the positive axis.
+		if (i == 0) model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0, 1, 0));
+		else if (i == 1) model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1, 0, 0));
+		model = glm::translate(model, glm::vec3(0, 0, -CONE_HEIGHT * 0.5f));
 		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
 		glUniform3fv(colorLocation, 1, glm::value_ptr(colors[i]));
-		gluSphere(qobj, SPHERE_RADIUS, SPHERE_SLICES, SPHERE_STACKS);
+		gluCylinder(qobj, CONE_RADIUS, 0.0, CONE_HEIGHT, CONE_SLICES, CONE_STACKS);
+		// Close the base with an outward-facing disk.
+		model = glm::rotate(model, glm::radians(180.0f), glm::vec3(1, 0, 0));
+		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
+		gluDisk(qobj, 0.0, CONE_RADIUS, CONE_SLICES, 1);
 	}
 }
 
