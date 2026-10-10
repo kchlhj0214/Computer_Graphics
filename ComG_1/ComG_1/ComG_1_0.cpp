@@ -1,5 +1,5 @@
 ﻿//프로젝트속성->링커->명령줄에다음과같이3개의라이브러리추가
-//-> opengl32.lib glew32.lib glfw3.lib
+//-> opengl32.lib glew32.lib glfw3.lib glu32.lib
 
 #include <gl/glew.h>
 #include <gl/glfw3.h>
