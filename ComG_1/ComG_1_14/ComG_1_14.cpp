@@ -1,4 +1,4 @@
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <GL/glu.h>
 #include <GL/glm/glm/glm.hpp>
@@ -22,6 +22,9 @@ using namespace std;
 #define CONE_SLICES 24
 #define CONE_STACKS 16
 #define VIEW_RANGE 1.35f
+#define ZOOM_STEP 0.05f
+#define VIEW_RANGE_MIN 0.10f
+#define VIEW_RANGE_MAX 5.0f
 #define CAMERA_X 3.0f
 #define CAMERA_Y 2.4f
 #define CAMERA_Z 4.0f
@@ -48,6 +51,7 @@ bool moveKeys[4] = {};
 glm::mat4 objectTransform(1.0f);
 mt19937 randomEngine(random_device{}());
 
+float viewRange = VIEW_RANGE;
 glm::vec3 cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
 float cameraRadius = glm::length(cameraPosition);
 float cameraYaw = 0.0f, cameraPitch = 0.0f;
@@ -63,6 +67,7 @@ bool InitShader();
 void DrawScene();
 void MouseCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorCallback(GLFWwindow* window, double x, double y);
+void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void ResetObject();
 void InitObject(ObjectType type);
@@ -83,6 +88,7 @@ int main()
 	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
 	glfwSetMouseButtonCallback(window, MouseCallback);
 	glfwSetCursorPosCallback(window, CursorCallback);
+	glfwSetScrollCallback(window, ScrollCallback);
 	glfwSetKeyCallback(window, KeyCallback);
 	glGenVertexArrays(1, &objectVao); glGenBuffers(1, &objectVbo);
 	float vertices[] = {
@@ -157,7 +163,7 @@ void DrawScene()
 	glEnable(GL_DEPTH_TEST); glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glUniform1i(vertexColorLocation, GL_FALSE);
 	glm::mat4 view = glm::lookAt(cameraPosition, glm::vec3(0.0f), glm::vec3(0, 1, 0));
-	glm::mat4 projection = glm::ortho(-VIEW_RANGE, VIEW_RANGE, -VIEW_RANGE, VIEW_RANGE, 0.1f, 20.0f);
+	glm::mat4 projection = glm::ortho(-viewRange, viewRange, -viewRange, viewRange, 0.1f, 20.0f);
 	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
 	glm::vec3 colors[3] = { {0.85f,0.12f,0.12f},{0.12f,0.65f,0.20f},{0.15f,0.30f,0.90f} };
@@ -307,4 +313,9 @@ void CursorCallback(GLFWwindow* window, double x, double y)
 		glm::cos(cameraPitch) * glm::sin(cameraYaw),
 		glm::sin(cameraPitch),
 		glm::cos(cameraPitch) * glm::cos(cameraYaw));
+}
+
+void ScrollCallback(GLFWwindow*, double, double yoffset)
+{
+	viewRange = glm::clamp(viewRange - (float)yoffset * ZOOM_STEP, VIEW_RANGE_MIN, VIEW_RANGE_MAX);
 }
