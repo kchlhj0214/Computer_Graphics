@@ -1,4 +1,4 @@
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <GL/glu.h>
 #include <GL/glm/glm/glm.hpp>
@@ -24,11 +24,16 @@ using namespace std;
 #define CAMERA_X 3.0f
 #define CAMERA_Y 2.4f
 #define CAMERA_Z 4.0f
+#define CAMERA_TARGET_X 0.0f
+#define CAMERA_TARGET_Y 0.0f
+#define CAMERA_TARGET_Z 0.0f
+#define CAMERA_MOVE_SPEED 1.0f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
 
-glm::vec3 cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
-float cameraRadius = glm::length(cameraPosition);
+glm::vec3 cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
+glm::vec3 cameraPosition = cameraTarget + glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
+float cameraRadius = glm::length(cameraPosition - cameraTarget);
 float cameraYaw = 0.0f, cameraPitch = 0.0f;
 double previousMouseX = 0.0, previousMouseY = 0.0;
 bool dragging = false;
@@ -76,8 +81,22 @@ int main()
 	gluQuadricDrawStyle(qobj, GLU_FILL);
 	gluQuadricNormals(qobj, GLU_NONE);
 	gluQuadricOrientation(qobj, GLU_OUTSIDE);
+	double cameraMoveTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
+		// Translate the camera and orbit target together in the fixed world XZ plane.
+		double cameraNow = glfwGetTime();
+		float cameraDelta = (float)glm::min(cameraNow - cameraMoveTime, 0.1);
+		cameraMoveTime = cameraNow;
+		glm::vec3 direction(0.0f);
+		if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) direction.z -= 1;
+		if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) direction.z += 1;
+		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) direction.x += 1;
+		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) direction.x -= 1;
+		if (glm::length(direction) > 0) {
+			glm::vec3 movement = glm::normalize(direction) * CAMERA_MOVE_SPEED * cameraDelta;
+			cameraTarget += movement; cameraPosition += movement;
+		}
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
 			glfwSetWindowShouldClose(window, true);
 		int width, height; glfwGetFramebufferSize(window, &width, &height);
@@ -122,7 +141,7 @@ void DrawScene()
 {
 	glClearColor(1, 1, 1, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(programID);
-	glm::mat4 view = glm::lookAt(cameraPosition, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+	glm::mat4 view = glm::lookAt(cameraPosition, cameraTarget, glm::vec3(0, 1, 0));
 	glm::mat4 projection = glm::ortho(-viewRange, viewRange, -viewRange, viewRange, 0.1f, 20.0f);
 	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
@@ -159,12 +178,12 @@ void MouseCallback(GLFWwindow* window, int button, int action, int)
 	if (action == GLFW_PRESS) {
 		dragging = true;
 		glfwGetCursorPos(window, &previousMouseX, &previousMouseY);
-		cameraYaw = glm::atan(cameraPosition.x, cameraPosition.z);
-		cameraPitch = glm::asin(cameraPosition.y / cameraRadius);
+		cameraYaw = glm::atan(cameraPosition.x - cameraTarget.x, cameraPosition.z - cameraTarget.z);
+		cameraPitch = glm::asin((cameraPosition.y - cameraTarget.y) / cameraRadius);
 	}
 	else if (action == GLFW_RELEASE) {
 		dragging = false;
-		cameraPosition = glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
+		cameraPosition = cameraTarget + glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
 	}
 }
 
@@ -184,7 +203,7 @@ void CursorCallback(GLFWwindow* window, double x, double y)
 	previousMouseX = x; previousMouseY = y;
 	cameraYaw = glm::mod(cameraYaw, glm::radians(360.0f));
 	cameraPitch = glm::clamp(cameraPitch, -glm::radians(ORBIT_PITCH_LIMIT), glm::radians(ORBIT_PITCH_LIMIT));
-	cameraPosition = cameraRadius * glm::vec3(
+	cameraPosition = cameraTarget + cameraRadius * glm::vec3(
 		glm::cos(cameraPitch) * glm::sin(cameraYaw),
 		glm::sin(cameraPitch),
 		glm::cos(cameraPitch) * glm::cos(cameraYaw));

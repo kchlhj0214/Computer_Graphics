@@ -32,6 +32,10 @@ using namespace std;
 #define CAMERA_X 3.0f
 #define CAMERA_Y 2.4f
 #define CAMERA_Z 4.0f
+#define CAMERA_TARGET_X 0.0f
+#define CAMERA_TARGET_Y 0.0f
+#define CAMERA_TARGET_Z 0.0f
+#define CAMERA_MOVE_SPEED 1.0f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
 #define OBJECT_ROTATE_X 0.0f
@@ -86,8 +90,9 @@ int selected = 3, activeKey = 0;
 bool negative = false, wireframe = false, shading = false, dragging = false;
 double accumulatedTime = 0.0;
 float animationProgress = 0.0f;
-glm::vec3 cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
-float cameraRadius = glm::length(cameraPosition), cameraYaw = 0, cameraPitch = 0;
+glm::vec3 cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
+glm::vec3 cameraPosition = cameraTarget + glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
+float cameraRadius = glm::length(cameraPosition - cameraTarget), cameraYaw = 0, cameraPitch = 0;
 double previousMouseX = 0, previousMouseY = 0;
 mt19937 randomEngine(random_device{}());
 GLuint programID = 0, vao = 0, vbo = 0, textVao = 0, textVbo = 0;
@@ -131,11 +136,25 @@ int main()
 	glfwSetCursorPosCallback(window, CursorCallback); glfwSetScrollCallback(window, ScrollCallback);
 	ResetScene();
 	double previousTime = glfwGetTime();
+	double cameraMoveTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		double now = glfwGetTime();
 		if (!glfwGetWindowAttrib(window, GLFW_FOCUSED)) activeKey = 0;
 		UpdateAnimation(glm::min(now - previousTime, 0.1)); previousTime = now;
 		glfwPollEvents();
+		// Translate the camera and orbit target together in the fixed world XZ plane.
+		double cameraNow = glfwGetTime();
+		float cameraDelta = (float)glm::min(cameraNow - cameraMoveTime, 0.1);
+		cameraMoveTime = cameraNow;
+		glm::vec3 direction(0.0f);
+		if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) direction.z -= 1;
+		if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) direction.z += 1;
+		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) direction.x += 1;
+		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) direction.x -= 1;
+		if (glm::length(direction) > 0) {
+			glm::vec3 movement = glm::normalize(direction) * CAMERA_MOVE_SPEED * cameraDelta;
+			cameraTarget += movement; cameraPosition += movement;
+		}
 		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
 		DrawScene(); glfwSwapBuffers(window);
 	}
@@ -194,19 +213,10 @@ void UploadMesh(Mesh& mesh, const vector<Vertex>& vertices)
 vector<Vertex> MakeShape(Shape shape)
 {
 	vector<Vertex> vertices;
-	glm::vec3 palette[8];
-	// 기본 도형은 성분 간격을 확보한 색상표를 사용하며, 곡면에서는 색상표를 반복한다.
-	for (int channel = 0; channel < 3; ++channel) {
-		float values[8], gap = COLOR_GAP + 0.00001f;
-		float offset = RandomFloat(0, COLOR_MAX - COLOR_MIN - 7 * gap);
-		for (int i = 0; i < 8; ++i) values[i] = COLOR_MIN + offset + i * gap;
-		shuffle(values, values + 8, randomEngine);
-		for (int i = 0; i < 8; ++i) palette[i][channel] = values[i];
-	}
-	auto color = [&](glm::vec3 p) { return palette[(p.x > 0 ? 1 : 0) + (p.y > 0 ? 2 : 0) + (p.z > 0 ? 4 : 0)]; };
+	glm::vec3 color(SKY_RED, SKY_GREEN, SKY_BLUE);
 	auto triangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 na, glm::vec3 nb, glm::vec3 nc) {
 		if (glm::length(glm::cross(b-a,c-a)) < 0.000001f) return;
-		vertices.push_back({a,color(a),na}); vertices.push_back({b,color(b),nb}); vertices.push_back({c,color(c),nc});
+		vertices.push_back({a,color,na}); vertices.push_back({b,color,nb}); vertices.push_back({c,color,nc});
 	};
 	if (shape == CUBE || shape == PYRAMID) {
 		glm::vec3 p[] = {{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f},
@@ -261,7 +271,7 @@ bool LoadObj(const char* path, Mesh& mesh, bool elephant)
 			istringstream stream(line); string tag; stream >> tag;
 			if (tag == "v" || tag == "vn") {
 				glm::vec3 value; if (!(stream >> value.x >> value.y >> value.z)) return false;
-				if (tag == "v") { positions.push_back(value); colors.push_back(glm::vec3(RandomFloat(COLOR_MIN,COLOR_MAX),RandomFloat(COLOR_MIN,COLOR_MAX),RandomFloat(COLOR_MIN,COLOR_MAX))); }
+				if (tag == "v") { positions.push_back(value); colors.push_back(glm::vec3(SKY_RED,SKY_GREEN,SKY_BLUE)); }
 				else normals.push_back(value);
 			}
 			else if (tag == "f") {
@@ -328,21 +338,15 @@ void ResetScene()
 {
 	animation=IDLE; animationProgress=0; accumulatedTime=0; activeKey=0; negative=false;
 	selected=3; wireframe=false; shading=false; dragging=false;
-	cameraPosition=glm::vec3(CAMERA_X,CAMERA_Y,CAMERA_Z); cameraRadius=glm::length(cameraPosition); cameraYaw=cameraPitch=0;
+	cameraTarget=glm::vec3(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z); cameraPosition=cameraTarget+glm::vec3(CAMERA_X,CAMERA_Y,CAMERA_Z); cameraRadius=glm::length(cameraPosition - cameraTarget); cameraYaw=cameraPitch=0;
 	for (int i=0;i<5;++i) UploadMesh(meshes[i],MakeShape((Shape)i));
-	// 초기화할 때 OBJ의 색상도 다시 뽑되, 같은 위치의 정점은 같은 색상을 사용한다.
+	// 초기화할 때도 OBJ의 정점 색상은 하늘색으로 유지한다.
 	for (int type=HEAD;type<=ELEPHANT;++type) {
 		Mesh& mesh=meshes[type];
 		vector<Vertex> vertices(mesh.count);
 		glBindBuffer(GL_ARRAY_BUFFER,mesh.vbo);
 		glGetBufferSubData(GL_ARRAY_BUFFER,0,vertices.size()*sizeof(Vertex),vertices.data());
-		map<vector<float>,glm::vec3> colors;
-		for (Vertex& vertex : vertices) {
-			vector<float> key={vertex.position.x,vertex.position.y,vertex.position.z};
-			auto found=colors.find(key);
-			if (found==colors.end()) found=colors.emplace(key,glm::vec3(RandomFloat(COLOR_MIN,COLOR_MAX),RandomFloat(COLOR_MIN,COLOR_MAX),RandomFloat(COLOR_MIN,COLOR_MAX))).first;
-			vertex.color=found->second;
-		}
+		for (Vertex& vertex : vertices) vertex.color=glm::vec3(SKY_RED,SKY_GREEN,SKY_BLUE);
 		UploadMesh(mesh,vertices);
 	}
 	// 기본 좌표축은 고정하고 초기 기울기는 객체의 자세에만 적용한다.
@@ -460,7 +464,7 @@ void DrawScene()
 	glClearColor(1,1,1,1); glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT); glUseProgram(programID);
 	glEnable(GL_DEPTH_TEST); glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
 	glUniform1i(vertexColorLocation,GL_FALSE); glUniform1i(shadingLocation,GL_FALSE);
-	glm::mat4 view=glm::lookAt(cameraPosition,glm::vec3(0),glm::vec3(0,1,0));
+	glm::mat4 view=glm::lookAt(cameraPosition,cameraTarget,glm::vec3(0,1,0));
 	glm::mat4 projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),PERSPECTIVE_ASPECT,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
 	glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view)); glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
 	glm::mat4 axes(1.0f); glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(axes));
@@ -543,9 +547,9 @@ void MouseCallback(GLFWwindow* window, int button, int action, int)
 	if (button!=GLFW_MOUSE_BUTTON_LEFT) return;
 	if (action==GLFW_PRESS) {
 		dragging=true; glfwGetCursorPos(window,&previousMouseX,&previousMouseY);
-		cameraYaw=glm::atan(cameraPosition.x,cameraPosition.z); cameraPitch=glm::asin(cameraPosition.y/cameraRadius);
+		cameraYaw=glm::atan(cameraPosition.x-cameraTarget.x,cameraPosition.z-cameraTarget.z); cameraPitch=glm::asin((cameraPosition.y-cameraTarget.y)/cameraRadius);
 	}
-	else if (action==GLFW_RELEASE) { dragging=false; cameraPosition=glm::normalize(glm::vec3(CAMERA_X,CAMERA_Y,CAMERA_Z))*cameraRadius; }
+	else if (action==GLFW_RELEASE) { dragging=false; cameraPosition=cameraTarget+glm::normalize(glm::vec3(CAMERA_X,CAMERA_Y,CAMERA_Z))*cameraRadius; }
 }
 
 void CursorCallback(GLFWwindow* window, double x, double y)
@@ -557,11 +561,11 @@ void CursorCallback(GLFWwindow* window, double x, double y)
 	previousMouseX=x; previousMouseY=y;
 	cameraYaw=glm::mod(cameraYaw,glm::two_pi<float>());
 	cameraPitch=glm::clamp(cameraPitch,-glm::radians(ORBIT_PITCH_LIMIT),glm::radians(ORBIT_PITCH_LIMIT));
-	cameraPosition=cameraRadius*glm::vec3(glm::cos(cameraPitch)*glm::sin(cameraYaw),glm::sin(cameraPitch),glm::cos(cameraPitch)*glm::cos(cameraYaw));
+	cameraPosition=cameraTarget+cameraRadius*glm::vec3(glm::cos(cameraPitch)*glm::sin(cameraYaw),glm::sin(cameraPitch),glm::cos(cameraPitch)*glm::cos(cameraYaw));
 }
 
 void ScrollCallback(GLFWwindow*, double, double yoffset)
 {
 	cameraRadius=glm::clamp(cameraRadius-(float)yoffset*ZOOM_STEP,CAMERA_RADIUS_MIN,CAMERA_RADIUS_MAX);
-	cameraPosition=glm::normalize(cameraPosition)*cameraRadius;
+	cameraPosition=cameraTarget+glm::normalize(cameraPosition-cameraTarget)*cameraRadius;
 }
