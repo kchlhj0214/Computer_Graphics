@@ -34,8 +34,8 @@ using namespace std;
 #define MOVE_PER_FRAME 0.01f
 #define ROTATE_PER_FRAME 1.0f
 #define OBJECT_SIZE 0.8f
-#define OBJECT_ROTATE_X 30.0f
-#define OBJECT_ROTATE_Y 30.0f
+#define OBJECT_ROTATE_X 0.0f
+#define OBJECT_ROTATE_Y 0.0f
 #define COLOR_MIN 0.10f
 #define COLOR_MAX 0.90f
 #define COLOR_GAP 0.10f
