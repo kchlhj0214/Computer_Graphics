@@ -1,4 +1,4 @@
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <GL/glu.h>
 #include <GL/glm/glm/glm.hpp>
@@ -22,7 +22,7 @@ using namespace std;
 #define CONE_HEIGHT (CONE_RADIUS * 2.0f)
 #define CONE_SLICES 24
 #define CONE_STACKS 16
-#define PERSPECTIVE_FOVY 27.360788f
+#define PERSPECTIVE_FOVY 27.0f
 #define PERSPECTIVE_ASPECT ((float)WINDOW_WIDTH / (float)WINDOW_HEIGHT)
 #define PERSPECTIVE_NEAR 0.10f
 #define PERSPECTIVE_FAR 30.0f
