@@ -1,9 +1,13 @@
 #version 330 compatibility
-// GLU supplies gl_Vertex; the axis VBO uses its compatible attribute 0.
 uniform mat4 modelTransform;
 uniform mat4 viewTransform;
 uniform mat4 projectionTransform;
+out vec3 worldPosition;
+out vec3 worldNormal;
 void main(void)
 {
-    gl_Position = projectionTransform * viewTransform * modelTransform * gl_Vertex;
+    vec4 world = modelTransform * gl_Vertex;
+    worldPosition = world.xyz;
+    worldNormal = transpose(inverse(mat3(modelTransform))) * gl_Normal;
+    gl_Position = projectionTransform * viewTransform * world;
 }

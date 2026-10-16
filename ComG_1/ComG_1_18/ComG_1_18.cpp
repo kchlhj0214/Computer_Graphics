@@ -8,107 +8,213 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 using namespace std;
 
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
-#define AXIS_LENGTH 1.0f
-#define CONE_RADIUS 0.0225f
-#define CONE_HEIGHT (CONE_RADIUS * 2.0f)
-#define CONE_SLICES 24
-#define CONE_STACKS 16
-#define PERSPECTIVE_FOVY 27.0f
-#define PERSPECTIVE_ASPECT ((float)WINDOW_WIDTH / (float)WINDOW_HEIGHT)
+#define CAMERA_X 0.0f
+#define CAMERA_Y 1.0f
+#define CAMERA_Z 4.0f
+#define PERSPECTIVE_FOVY 40.0f
+#define PERSPECTIVE_ASPECT ((float)WINDOW_WIDTH / WINDOW_HEIGHT)
 #define PERSPECTIVE_NEAR 0.10f
 #define PERSPECTIVE_FAR 30.0f
-#define ZOOM_STEP 0.05f
+#define VIEW_RANGE 1.50f
+#define VIEW_RANGE_MIN 0.20f
+#define VIEW_RANGE_MAX 5.0f
 #define CAMERA_RADIUS_MIN 1.50f
 #define CAMERA_RADIUS_MAX 20.0f
-#define CAMERA_X 3.0f
-#define CAMERA_Y 2.4f
-#define CAMERA_Z 4.0f
-#define CAMERA_TARGET_X 0.0f
-#define CAMERA_TARGET_Y 0.0f
-#define CAMERA_TARGET_Z 0.0f
-#define CAMERA_MOVE_SPEED 1.0f
+#define ZOOM_STEP 0.05f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
+#define OBJECT_MOVE_SPEED 0.50f
+#define SUN_RADIUS 0.16f
+#define SUN_SCALE_MIN 0.75f
+#define SUN_SCALE_MAX 1.25f
+#define SUN_CYCLE_SPEED 1.5f
+#define SUN_SMALL_RED 0.90f
+#define SUN_SMALL_GREEN 0.20f
+#define SUN_SMALL_BLUE 0.10f
+#define SUN_LARGE_RED 0.90f
+#define SUN_LARGE_GREEN 0.80f
+#define SUN_LARGE_BLUE 0.10f
+#define PLANET_RADIUS 0.075f
+#define MOON_RADIUS 0.028f
+#define PLANET_ORBIT_1 1.0f
+#define PLANET_ORBIT_2 1.0f
+#define PLANET_ORBIT_3 1.0f
+#define PLANET_SPEED_1 25.0f
+#define PLANET_SPEED_2 17.0f
+#define PLANET_SPEED_3 11.0f
+#define ORBIT_TILT 45.0f
+#define MOON_ORBIT_RADIUS 0.15f
+#define MOON_SPEED_1 100.0f
+#define MOON_SPEED_2 80.0f
+#define MOON_SPEED_3 60.0f
+#define MOON_TILT_SPEED 35.0f
+#define ORBIT_SCALE_MIN 0.85f
+#define ORBIT_SCALE_MAX 1.15f
+#define ORBIT_CYCLE_SPEED 1.0f
+#define SPHERE_SLICES 32
+#define SPHERE_STACKS 24
+#define PATH_SEGMENTS 128
+#define DIFFUSE_STRENGTH 1.0f
+#define SPECULAR_STRENGTH 0.45f
+#define SHININESS 32.0f
 
-glm::vec3 cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
-glm::vec3 cameraPosition = cameraTarget + glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
-float cameraRadius = glm::length(cameraPosition - cameraTarget);
-float cameraYaw = 0.0f, cameraPitch = 0.0f;
-double previousMouseX = 0.0, previousMouseY = 0.0;
-bool dragging = false;
-
-
-GLuint programID = 0, vao = 0, vbo = 0;
-GLint modelLocation = -1, viewLocation = -1, projectionLocation = -1, colorLocation = -1;
-GLUquadric* qobj = nullptr;
+struct Planet { float radius, speed, moonSpeed, tilt, angle, moonAngle; glm::vec3 color; };
+Planet planets[3] = {
+	{PLANET_ORBIT_1,PLANET_SPEED_1,MOON_SPEED_1,0,0,0,{.9f,.1f,.1f}},
+	{PLANET_ORBIT_2,PLANET_SPEED_2,MOON_SPEED_2,ORBIT_TILT,120,120,{.1f,.9f,.1f}},
+	{PLANET_ORBIT_3,PLANET_SPEED_3,MOON_SPEED_3,-ORBIT_TILT,240,240,{.1f,.1f,.9f}}
+};
+glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z), scenePosition(0);
+float cameraRadius=glm::length(cameraPosition), cameraYaw=0, cameraPitch=0, viewRange=VIEW_RANGE;
+float orbitPhase=0, sunPhase=0, moonTilt=0;
+bool perspective=true, wireframe=false, orbitChanging=false, sunChanging=false, moonRotating=false, dragging=false;
+double previousMouseX=0, previousMouseY=0;
+GLuint programID=0, vao=0, vbo=0;
+GLint modelLocation,viewLocation,projectionLocation,colorLocation,shadingLocation;
+GLUquadric* qobj=nullptr;
 
 string ReadFile(const char* name);
 bool InitShader();
 void DrawScene();
-void MouseCallback(GLFWwindow* window, int button, int action, int mods);
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
-void CursorCallback(GLFWwindow* window, double x, double y);
+void DrawSphere(glm::vec3 center, float radius, glm::vec3 color, bool shaded);
+void DrawPath(const glm::mat4& model, glm::vec3 color);
+void KeyCallback(GLFWwindow* window,int key,int scancode,int action,int mods);
+void MouseCallback(GLFWwindow* window,int button,int action,int mods);
+void CursorCallback(GLFWwindow* window,double x,double y);
+void ScrollCallback(GLFWwindow* window,double xoffset,double yoffset);
 
 int main()
 {
-	if (!glfwInit()) return -1;
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	// GLU submits legacy vertices; the shader still transforms them.
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "1-13 Orbit PERSP", nullptr, nullptr);
-	if (!window) { glfwTerminate(); return -1; }
-	glfwMakeContextCurrent(window); glewExperimental = GL_TRUE;
-	if (glewInit() != GLEW_OK || !InitShader()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
+	if(!glfwInit())return -1;
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_COMPAT_PROFILE); glfwWindowHint(GLFW_RESIZABLE,GLFW_FALSE);
+	GLFWwindow* window=glfwCreateWindow(WINDOW_WIDTH,WINDOW_HEIGHT,"1-18 Planet Orbits",nullptr,nullptr);
+	if(!window){glfwTerminate();return -1;}
+	glfwMakeContextCurrent(window); glewExperimental=GL_TRUE;
+	if(glewInit()!=GLEW_OK || !InitShader()){glfwDestroyWindow(window);glfwTerminate();return -1;}
 	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
-	glfwSetMouseButtonCallback(window, MouseCallback);
-	glfwSetCursorPosCallback(window, CursorCallback);
-	glfwSetScrollCallback(window, ScrollCallback);
-	float vertices[] = {
-		-AXIS_LENGTH,0,0, AXIS_LENGTH,0,0,
-		0,-AXIS_LENGTH,0, 0,AXIS_LENGTH,0,
-		0,0,-AXIS_LENGTH, 0,0,AXIS_LENGTH
-	};
-	glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo);
-	glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-	glEnableVertexAttribArray(0); glBindVertexArray(0);
-	qobj = gluNewQuadric();
-	if (!qobj) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
-	gluQuadricDrawStyle(qobj, GLU_FILL);
-	gluQuadricNormals(qobj, GLU_NONE);
-	gluQuadricOrientation(qobj, GLU_OUTSIDE);
-	double cameraMoveTime = glfwGetTime();
-	while (!glfwWindowShouldClose(window)) {
-		glfwPollEvents();
-		// Translate the camera and orbit target together in the fixed world XZ plane.
-		double cameraNow = glfwGetTime();
-		float cameraDelta = (float)glm::min(cameraNow - cameraMoveTime, 0.1);
-		cameraMoveTime = cameraNow;
-		glm::vec3 direction(0.0f);
-		if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) direction.z -= 1;
-		if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) direction.z += 1;
-		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) direction.x += 1;
-		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) direction.x -= 1;
-		if (glm::length(direction) > 0) {
-			glm::vec3 movement = glm::normalize(direction) * CAMERA_MOVE_SPEED * cameraDelta;
-			cameraTarget += movement; cameraPosition += movement;
-		}
-		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-			glfwSetWindowShouldClose(window, true);
-		int width, height; glfwGetFramebufferSize(window, &width, &height);
-		glViewport(0, 0, width, height);
-		DrawScene(); glfwSwapBuffers(window);
+	glfwSetKeyCallback(window,KeyCallback); glfwSetMouseButtonCallback(window,MouseCallback);
+	glfwSetCursorPosCallback(window,CursorCallback); glfwSetScrollCallback(window,ScrollCallback);
+	shadingLocation=glGetUniformLocation(programID,"useShading");
+	vector<glm::vec3> path;
+	for(int i=0;i<PATH_SEGMENTS;++i){float a=glm::two_pi<float>()*i/PATH_SEGMENTS;path.push_back({glm::cos(a),0,glm::sin(a)});}
+	glGenVertexArrays(1,&vao);glGenBuffers(1,&vbo);glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER,vbo);
+	glBufferData(GL_ARRAY_BUFFER,path.size()*sizeof(glm::vec3),path.data(),GL_STATIC_DRAW);
+	glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(glm::vec3),nullptr);glEnableVertexAttribArray(0);glBindVertexArray(0);
+	qobj=gluNewQuadric();if(!qobj){glfwDestroyWindow(window);glfwTerminate();return -1;}
+	gluQuadricNormals(qobj,GLU_SMOOTH);gluQuadricOrientation(qobj,GLU_OUTSIDE);
+	cout<<"p/P: ORTHO/PERSP | m/M: SOLID/WIRE | WASD, +/-: move | 1/2/3: orbit size/sun/moon tilt | q: quit"<<endl;
+	double previousTime=glfwGetTime();
+	while(!glfwWindowShouldClose(window)){
+		glfwPollEvents();double now=glfwGetTime();float dt=(float)glm::min(now-previousTime,0.1);previousTime=now;
+		glm::vec3 movement(0);
+		if(glfwGetKey(window,GLFW_KEY_A)==GLFW_PRESS)movement.x-=1;
+		if(glfwGetKey(window,GLFW_KEY_D)==GLFW_PRESS)movement.x+=1;
+		if(glfwGetKey(window,GLFW_KEY_W)==GLFW_PRESS)movement.y+=1;
+		if(glfwGetKey(window,GLFW_KEY_S)==GLFW_PRESS)movement.y-=1;
+		bool shift=glfwGetKey(window,GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS || glfwGetKey(window,GLFW_KEY_RIGHT_SHIFT)==GLFW_PRESS;
+		if(glfwGetKey(window,GLFW_KEY_KP_ADD)==GLFW_PRESS || (shift && glfwGetKey(window,GLFW_KEY_EQUAL)==GLFW_PRESS))movement.z+=1;
+		if(glfwGetKey(window,GLFW_KEY_KP_SUBTRACT)==GLFW_PRESS || glfwGetKey(window,GLFW_KEY_MINUS)==GLFW_PRESS)movement.z-=1;
+		if(glm::length(movement)>0)scenePosition+=glm::normalize(movement)*OBJECT_MOVE_SPEED*dt;
+		for(Planet& p:planets){p.angle=glm::mod(p.angle+p.speed*dt,360.0f);p.moonAngle=glm::mod(p.moonAngle+p.moonSpeed*dt,360.0f);}
+		if(orbitChanging)orbitPhase=glm::mod(orbitPhase+ORBIT_CYCLE_SPEED*dt,glm::two_pi<float>());
+		if(sunChanging)sunPhase=glm::mod(sunPhase+SUN_CYCLE_SPEED*dt,glm::two_pi<float>());
+		if(moonRotating)moonTilt=glm::mod(moonTilt+MOON_TILT_SPEED*dt,360.0f);
+		int width,height;glfwGetFramebufferSize(window,&width,&height);glViewport(0,0,width,height);
+		DrawScene();glfwSwapBuffers(window);
 	}
-	gluDeleteQuadric(qobj);
-	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
-	glfwDestroyWindow(window); glfwTerminate(); return 0;
+	gluDeleteQuadric(qobj);glDeleteBuffers(1,&vbo);glDeleteVertexArrays(1,&vao);glDeleteProgram(programID);
+	glfwDestroyWindow(window);glfwTerminate();return 0;
+}
+
+void DrawPath(const glm::mat4& model,glm::vec3 color)
+{
+	glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(model));
+	glUniform3fv(colorLocation,1,glm::value_ptr(color));glUniform1i(shadingLocation,GL_FALSE);
+	glBindVertexArray(vao);glDrawArrays(GL_LINE_LOOP,0,PATH_SEGMENTS);glBindVertexArray(0);
+}
+
+void DrawSphere(glm::vec3 center,float radius,glm::vec3 color,bool shaded)
+{
+	glm::mat4 model=glm::translate(glm::mat4(1),center);
+	glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(model));
+	glUniform3fv(colorLocation,1,glm::value_ptr(color));glUniform1i(shadingLocation,shaded);
+	gluSphere(qobj,radius,SPHERE_SLICES,SPHERE_STACKS);
+}
+
+void DrawScene()
+{
+	glClearColor(1,1,1,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);glUseProgram(programID);
+	glm::mat4 view=glm::lookAt(cameraPosition,glm::vec3(0),glm::vec3(0,1,0));
+	glm::mat4 projection=perspective ? glm::perspective(glm::radians(PERSPECTIVE_FOVY),PERSPECTIVE_ASPECT,PERSPECTIVE_NEAR,PERSPECTIVE_FAR)
+		: glm::ortho(-viewRange*PERSPECTIVE_ASPECT,viewRange*PERSPECTIVE_ASPECT,-viewRange,viewRange,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+	glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view));glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
+	glUniform3fv(glGetUniformLocation(programID,"lightPosition"),1,glm::value_ptr(scenePosition));
+	glUniform3fv(glGetUniformLocation(programID,"eyePosition"),1,glm::value_ptr(cameraPosition));
+	glUniform1f(glGetUniformLocation(programID,"diffuseStrength"),DIFFUSE_STRENGTH);
+	glUniform1f(glGetUniformLocation(programID,"specularStrength"),SPECULAR_STRENGTH);
+	glUniform1f(glGetUniformLocation(programID,"shininess"),SHININESS);
+	gluQuadricDrawStyle(qobj,wireframe ? GLU_LINE : GLU_FILL);
+	float t=(glm::sin(sunPhase)+1)*.5f;
+	glm::vec3 sunColor=glm::mix(glm::vec3(SUN_SMALL_RED,SUN_SMALL_GREEN,SUN_SMALL_BLUE),glm::vec3(SUN_LARGE_RED,SUN_LARGE_GREEN,SUN_LARGE_BLUE),t);
+	DrawSphere(scenePosition,SUN_RADIUS*glm::mix(SUN_SCALE_MIN,SUN_SCALE_MAX,t),sunColor,false);
+	float orbitScale=glm::mix(ORBIT_SCALE_MIN,ORBIT_SCALE_MAX,(glm::sin(orbitPhase)+1)*.5f);
+	for(const Planet& p:planets){
+		glm::mat4 tilt=glm::rotate(glm::mat4(1),glm::radians(p.tilt),glm::vec3(0,0,1));
+		glm::mat4 orbit=glm::translate(glm::mat4(1),scenePosition)*tilt;
+		DrawPath(glm::scale(orbit,glm::vec3(p.radius*orbitScale)),p.color);
+		float a=glm::radians(p.angle);
+		glm::vec3 center=glm::vec3(orbit*glm::vec4(p.radius*orbitScale*glm::cos(a),0,p.radius*orbitScale*glm::sin(a),1));
+		DrawSphere(center,PLANET_RADIUS,p.color,true);
+		// Rotate the initially world-XZ moon orbit about the planet orbit's local Z.
+		glm::vec3 localZ=glm::vec3(tilt*glm::vec4(0,0,1,0));
+		glm::mat4 moonOrbit=glm::rotate(glm::translate(glm::mat4(1),center),glm::radians(moonTilt),localZ);
+		float radius=MOON_ORBIT_RADIUS*orbitScale;glm::vec3 moonColor=glm::vec3(1)-p.color;
+		DrawPath(glm::scale(moonOrbit,glm::vec3(radius)),moonColor);
+		a=glm::radians(p.moonAngle);
+		glm::vec3 moonCenter=glm::vec3(moonOrbit*glm::vec4(radius*glm::cos(a),0,radius*glm::sin(a),1));
+		DrawSphere(moonCenter,MOON_RADIUS,moonColor,true);
+	}
+}
+
+void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
+{
+	if(action!=GLFW_PRESS)return;
+	if(key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window,true);
+	if(key==GLFW_KEY_P)perspective=(mods&GLFW_MOD_SHIFT)!=0;
+	if(key==GLFW_KEY_M)wireframe=(mods&GLFW_MOD_SHIFT)!=0;
+	if(key==GLFW_KEY_1)orbitChanging=!orbitChanging;
+	if(key==GLFW_KEY_2)sunChanging=!sunChanging;
+	if(key==GLFW_KEY_3)moonRotating=!moonRotating;
+}
+
+void MouseCallback(GLFWwindow* window,int button,int action,int)
+{
+	if(button!=GLFW_MOUSE_BUTTON_LEFT)return;
+	dragging=action==GLFW_PRESS;
+	if(dragging){glfwGetCursorPos(window,&previousMouseX,&previousMouseY);cameraYaw=glm::atan(cameraPosition.x,cameraPosition.z);cameraPitch=glm::asin(cameraPosition.y/cameraRadius);}
+}
+
+void CursorCallback(GLFWwindow* window,double x,double y)
+{
+	if(!dragging)return;
+	int width,height;glfwGetWindowSize(window,&width,&height);if(width<=0 || height<=0)return;
+	cameraYaw-=glm::radians(ORBIT_DEGREES)*(float)(x-previousMouseX)/width;
+	cameraPitch+=glm::radians(ORBIT_DEGREES)*(float)(y-previousMouseY)/height;
+	previousMouseX=x;previousMouseY=y;cameraYaw=glm::mod(cameraYaw,glm::two_pi<float>());
+	cameraPitch=glm::clamp(cameraPitch,-glm::radians(ORBIT_PITCH_LIMIT),glm::radians(ORBIT_PITCH_LIMIT));
+	cameraPosition=cameraRadius*glm::vec3(glm::cos(cameraPitch)*glm::sin(cameraYaw),glm::sin(cameraPitch),glm::cos(cameraPitch)*glm::cos(cameraYaw));
+}
+
+void ScrollCallback(GLFWwindow*,double,double yoffset)
+{
+	if(perspective){cameraRadius=glm::clamp(cameraRadius-(float)yoffset*ZOOM_STEP,CAMERA_RADIUS_MIN,CAMERA_RADIUS_MAX);cameraPosition=glm::normalize(cameraPosition)*cameraRadius;}
+	else viewRange=glm::clamp(viewRange-(float)yoffset*ZOOM_STEP,VIEW_RANGE_MIN,VIEW_RANGE_MAX);
 }
 
 string ReadFile(const char* name)
@@ -140,75 +246,3 @@ bool InitShader()
 	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
 }
 
-void DrawScene()
-{
-	glClearColor(1, 1, 1, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glUseProgram(programID);
-	glm::mat4 view = glm::lookAt(cameraPosition, cameraTarget, glm::vec3(0, 1, 0));
-	glm::mat4 projection = glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR);
-	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
-	glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
-	glm::vec3 colors[3] = { {0.85f,0.12f,0.12f},{0.12f,0.65f,0.20f},{0.15f,0.30f,0.90f} };
-	glm::vec3 ends[3] = { {AXIS_LENGTH,0,0},{0,AXIS_LENGTH,0},{0,0,AXIS_LENGTH} };
-	glm::mat4 model = glm::mat4(1.0f);
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-	glBindVertexArray(vao); glLineWidth(1);
-	for (int i = 0; i < 3; ++i) {
-		glUniform3fv(colorLocation, 1, glm::value_ptr(colors[i]));
-		glDrawArrays(GL_LINES, i * 2, 2);
-	}
-	glBindVertexArray(0);
-	for (int i = 0; i < 3; ++i) {
-		model = glm::mat4(1.0f);
-		model = glm::translate(model, ends[i]);
-		// GLU cones point along local +Z; align it with the positive axis.
-		if (i == 0) model = glm::rotate(model, glm::radians(90.0f), glm::vec3(0, 1, 0));
-		else if (i == 1) model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1, 0, 0));
-		model = glm::translate(model, glm::vec3(0, 0, -CONE_HEIGHT * 0.5f));
-		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-		glUniform3fv(colorLocation, 1, glm::value_ptr(colors[i]));
-		gluCylinder(qobj, CONE_RADIUS, 0.0, CONE_HEIGHT, CONE_SLICES, CONE_STACKS);
-		// Close the base with an outward-facing disk.
-		model = glm::rotate(model, glm::radians(180.0f), glm::vec3(1, 0, 0));
-		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-		gluDisk(qobj, 0.0, CONE_RADIUS, CONE_SLICES, 1);
-	}
-}
-
-void MouseCallback(GLFWwindow* window, int button, int action, int)
-{
-	if (button != GLFW_MOUSE_BUTTON_LEFT) return;
-	if (action == GLFW_PRESS) {
-		dragging = true;
-		glfwGetCursorPos(window, &previousMouseX, &previousMouseY);
-		cameraYaw = glm::atan(cameraPosition.x - cameraTarget.x, cameraPosition.z - cameraTarget.z);
-		cameraPitch = glm::asin((cameraPosition.y - cameraTarget.y) / cameraRadius);
-	}
-	else if (action == GLFW_RELEASE) {
-		dragging = false;
-		cameraPosition = cameraTarget + glm::normalize(glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z)) * cameraRadius;
-	}
-}
-
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
-{
-	cameraRadius = glm::clamp(cameraRadius - (float)yoffset * ZOOM_STEP, CAMERA_RADIUS_MIN, CAMERA_RADIUS_MAX);
-	cameraPosition = cameraTarget + glm::normalize(cameraPosition - cameraTarget) * cameraRadius;
-}
-
-void CursorCallback(GLFWwindow* window, double x, double y)
-{
-	if (!dragging) return;
-	int width, height; glfwGetWindowSize(window, &width, &height);
-	if (width <= 0 || height <= 0) return;
-	// Drag the scene: horizontal and vertical deltas control yaw and pitch.
-	cameraYaw -= glm::radians(ORBIT_DEGREES) * (float)(x - previousMouseX) / width;
-	cameraPitch += glm::radians(ORBIT_DEGREES) * (float)(y - previousMouseY) / height;
-	previousMouseX = x; previousMouseY = y;
-	cameraYaw = glm::mod(cameraYaw, glm::radians(360.0f));
-	cameraPitch = glm::clamp(cameraPitch, -glm::radians(ORBIT_PITCH_LIMIT), glm::radians(ORBIT_PITCH_LIMIT));
-	cameraPosition = cameraTarget + cameraRadius * glm::vec3(
-		glm::cos(cameraPitch) * glm::sin(cameraYaw),
-		glm::sin(cameraPitch),
-		glm::cos(cameraPitch) * glm::cos(cameraYaw));
-}
