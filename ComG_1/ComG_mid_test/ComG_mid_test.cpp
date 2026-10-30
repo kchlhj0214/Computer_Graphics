@@ -47,25 +47,8 @@ using namespace std;
 #define FLOOR_GREEN 0.88f
 #define FLOOR_BLUE 0.94f
 // ===========================================================================
-// 탱크 부품 크기
+// 부품 크기는 BuildTank()의 각 생성문에서 지정합니다.
 // ===========================================================================
-#define LOWER_WIDTH 0.26f
-#define LOWER_HEIGHT 0.24f
-#define LOWER_DEPTH 0.90f
-#define LOWER_GAP 0.26f
-#define MIDDLE_WIDTH 0.90f
-#define MIDDLE_HEIGHT 0.12f
-#define MIDDLE_DEPTH 0.62f
-#define UPPER_WIDTH 0.28f
-#define UPPER_HEIGHT 0.22f
-#define UPPER_DEPTH 0.32f
-#define UPPER_GAP 0.16f
-#define BARREL_WIDTH 0.045f
-#define BARREL_HEIGHT 0.045f
-#define BARREL_LENGTH 0.40f
-#define POLE_WIDTH 0.035f
-#define POLE_HEIGHT 0.42f
-#define POLE_DEPTH 0.035f
 // ===========================================================================
 // 애니메이션과 색상 설정
 // ===========================================================================
@@ -90,10 +73,36 @@ using namespace std;
 // ============================================================================
 // 2. 도형과 설정 자료형 (위치는 중심, 크기는 전체 폭/높이/깊이)
 // ============================================================================
-enum class ShapeKind { Box, Cone, Cylinder, Sphere, Pyramid };
-enum class Mode { Once, Loop, PingPong };
-enum class Anchor { Center, Left, Right, Bottom, Top, Front, Back };
-enum class ActionKind { Move, Rotate, Scale, Swap };
+enum class ShapeKind { Box, Cone, Cylinder, Sphere, Pyramid }; // 모양 종류 / 육면체, 원뿔, 원기둥, 구, 사각뿔
+enum class Mode { Once, Loop, PingPong }; // 반복 방식 / 한 사이클, 계속 진행, 왕복
+enum class Anchor { Center, Left, Right, Bottom, Top, Front, Back }; // 로컬 기준점 / 중심, 왼쪽, 오른쪽, 아래, 위, 앞(-Z), 뒤(+Z)
+enum class ActionKind { Move, Rotate, Scale, Swap }; // 기능 종류 / 이동, 회전, 신축, 위치 교환
+
+enum class TopDirection { X, Y, Z, MinusX, MinusY, MinusZ }; // 생성 시 윗방향 / +X, +Y, +Z, -X, -Y, -Z
+// Local: 도형 초기 자세 기준, Parent: 부모 회전 기준, World: 고정 월드 축 기준
+// 신축 축/기준점은 항상 도형 로컬 좌표이며 이 설정은 이동·회전에만 적용합니다.
+enum class TransformSpace { Local, Parent, World }; // 변환 축 좌표계 / 도형, 부모, 월드
+
+// TopRotation(direction): 원래 +Y인 도형의 윗방향을 지정 축으로 돌립니다.
+// angles가 추가로 있으면 방향 설정 후 부모 좌표의 Euler 회전을 적용합니다.
+glm::quat TopRotation(TopDirection direction)
+{
+    switch (direction)
+    {
+    case TopDirection::X:
+        return glm::angleAxis(glm::radians(-90.0f),glm::vec3(0,0,1));
+    case TopDirection::MinusX:
+        return glm::angleAxis(glm::radians(90.0f),glm::vec3(0,0,1));
+    case TopDirection::Z:
+        return glm::angleAxis(glm::radians(90.0f),glm::vec3(1,0,0));
+    case TopDirection::MinusZ:
+        return glm::angleAxis(glm::radians(-90.0f),glm::vec3(1,0,0));
+    case TopDirection::MinusY:
+        return glm::angleAxis(glm::radians(180.0f),glm::vec3(1,0,0));
+    default:
+        return glm::quat(1,0,0,0);
+    }
+}
 
 // 앞은 -Z, 뒤는 +Z입니다. AnchorPoint(Shape::bottom)는 (0,-0.5,0)입니다.
 inline glm::vec3 AnchorPoint(Anchor a)
@@ -141,6 +150,7 @@ struct Shape
 
     int id, part;
     ShapeKind kind;
+    TopDirection topDirection = TopDirection::Y;
     glm::vec3 position, size, angles{0};
     Color color;
     glm::vec3 initialColor{0};
@@ -154,8 +164,8 @@ struct Shape
     glm::quat worldRotation{1, 0, 0, 0};
 
     // angles는 생성 후 선택적으로 설정하는 초기 X/Y/Z 각도(도)입니다.
-    Shape(int id, int part, ShapeKind kind, glm::vec3 position, glm::vec3 size, Color color)
-        : id(id), part(part), kind(kind), position(position), size(size), color(color)
+    Shape(int id, int part, ShapeKind kind, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : id(id), part(part), kind(kind), topDirection(topDirection), position(position), size(size), color(color)
     {
     }
 };
@@ -165,8 +175,8 @@ struct Shape
 // Box(ID,파트,위치,크기,색상): 직육면체를 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Box : Shape
 {
-    Box(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
-        : Shape(id, part, ShapeKind::Box, position, size, color)
+    Box(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : Shape(id, part, ShapeKind::Box, position, size, color, topDirection)
     {
     }
 };
@@ -174,8 +184,8 @@ struct Box : Shape
 // Cone(ID,파트,위치,크기,색상): 원뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cone : Shape
 {
-    Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
-        : Shape(id, part, ShapeKind::Cone, position, size, color)
+    Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : Shape(id, part, ShapeKind::Cone, position, size, color, topDirection)
     {
     }
 };
@@ -183,8 +193,8 @@ struct Cone : Shape
 // Cylinder(ID,파트,위치,크기,색상): 원기둥을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cylinder : Shape
 {
-    Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
-        : Shape(id, part, ShapeKind::Cylinder, position, size, color)
+    Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : Shape(id, part, ShapeKind::Cylinder, position, size, color, topDirection)
     {
     }
 };
@@ -192,8 +202,8 @@ struct Cylinder : Shape
 // Sphere(ID,파트,위치,크기,색상): 구를 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Sphere : Shape
 {
-    Sphere(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
-        : Shape(id, part, ShapeKind::Sphere, position, size, color)
+    Sphere(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : Shape(id, part, ShapeKind::Sphere, position, size, color, topDirection)
     {
     }
 };
@@ -201,8 +211,8 @@ struct Sphere : Shape
 // Pyramid(ID,파트,위치,크기,색상): 사각뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Pyramid : Shape
 {
-    Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
-        : Shape(id, part, ShapeKind::Pyramid, position, size, color)
+    Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
+        : Shape(id, part, ShapeKind::Pyramid, position, size, color, topDirection)
     {
     }
 };
@@ -229,6 +239,7 @@ struct Action
     ActionKind kind;
     Target target;
     int key;
+    TransformSpace space = TransformSpace::Parent;
     glm::vec3 axis{0, 1, 0};
     Anchor pivot = Shape::center;
     Mode mode = Mode::Once;
@@ -270,6 +281,21 @@ public:
         return it->second;
     }
 
+    // PlaceOnFloor(대상): 루트 도형을 생성 크기/초기 방향에 맞춰 바닥 Y=0에 놓습니다.
+    // 모든 루트 도형을 생성한 뒤, 연결과 동작 설정 전에 호출합니다.
+    void PlaceOnFloor(Target target)
+    {
+        Evaluate();
+        for (int id : Resolve(target))
+        {
+            Shape& s=Get(id);
+            if (s.parent>=0 || !s.supports.empty())
+                throw std::runtime_error("PlaceOnFloor requires unattached root shapes");
+            s.position.y-=Bounds(s.geometry).first.y;
+        }
+        Evaluate();
+    }
+
     // Attach(자식, 부모, 자식접점, 부모접점, 여유위치, 회전상속).
     // 자식.position은 접점에서의 추가 위치입니다. 부모 크기는 상속하지 않습니다.
     // 포신: Attach(gun, turret, Shape::back, Shape::center).
@@ -300,11 +326,12 @@ public:
     }
 
     // AddMovement(대상,키,방향,거리,초당거리,반복방식).
-    // 방향은 부모 좌표 기준이며 자동 정규화합니다. 파트 전체는 같은 진행값을 씁니다.
+    // 마지막 space로 Local/Parent/World를 선택합니다. 기본은 Parent이며 방향은 자동 정규화합니다.
     int AddMovement(Target target, int key, glm::vec3 direction, float distance,
-                    float speed, Mode mode = Mode::Once)
+                    float speed, Mode mode = Mode::Once, TransformSpace space = TransformSpace::Parent)
     {
         Action a{ActionKind::Move, target, key};
+        a.space = space;
         a.axis = Unit(direction);
         a.amount = distance;
         a.speed = speed;
@@ -313,11 +340,13 @@ public:
     }
 
     // AddRotation(대상,키,회전축,기준점,+1/-1 방향,초당각도,사이클각도,반복방식).
-    // 기준점은 신축 후 도형의 면 중심입니다. 부모를 유지하면서 자신의 축으로 회전합니다.
+    // 기준점은 신축 후 로컬 면 중심입니다. 마지막 space는 Local/Parent/World(기본 Local)입니다.
     int AddRotation(Target target, int key, glm::vec3 axis, Anchor pivot,
-                    float direction, float speed, float cycle = 360, Mode mode = Mode::Once)
+                    float direction, float speed, float cycle = 360, Mode mode = Mode::Once,
+                    TransformSpace space = TransformSpace::Local)
     {
         Action a{ActionKind::Rotate, target, key};
+        a.space = space;
         a.axis = Unit(axis);
         a.pivot = pivot;
         a.direction = direction < 0 ? -1.0f : 1.0f;
@@ -610,14 +639,21 @@ private:
     }
 
     // Movement: 개별 이동과 위치 교환을 합산합니다. 부모 좌표계 기준입니다.
-    glm::vec3 Movement(int id)
+    glm::vec3 Movement(int id, glm::quat inherited = glm::quat(1,0,0,0))
     {
         glm::vec3 result(0);
         const Shape& s=Get(id);
         for (const Action& a : actions)
         {
             if (a.kind==ActionKind::Move && Matches(a,s))
-                result+=a.axis*a.value;
+            {
+                glm::vec3 direction=a.axis;
+                if (a.space==TransformSpace::Local)
+                    direction=glm::quat(glm::radians(s.angles))*TopRotation(s.topDirection)*direction;
+                else if (a.space==TransformSpace::World)
+                    direction=glm::inverse(inherited)*direction;
+                result+=direction*a.value;
+            }
             if (a.kind==ActionKind::Swap)
             {
                 if (a.target.value==id)
@@ -640,7 +676,7 @@ private:
         Shape& s=Get(id);
         glm::vec3 origin=position;
         glm::quat inherited(1,0,0,0);
-        glm::quat initial=glm::quat(glm::radians(s.angles));
+        glm::quat initial=glm::quat(glm::radians(s.angles))*TopRotation(s.topDirection);
         if (s.parent>=0)
         {
             EvaluateOne(s.parent,state);
@@ -666,7 +702,7 @@ private:
         glm::vec3 ownPoint(0);
         if (s.parent>=0 || !s.supports.empty())
             ownPoint=initial*(AnchorPoint(s.ownAnchor)*s.size);
-        origin+=inherited*(s.position+s.attachmentOffset-ownPoint+Movement(id));
+        origin+=inherited*(s.position+s.attachmentOffset-ownPoint+Movement(id,inherited));
 
         glm::vec3 scale(1), scalePivot(0), rotationAxis(0,1,0);
         Anchor rotationAnchor=Shape::center;
@@ -684,12 +720,16 @@ private:
             {
                 angle=a.value;
                 rotationAxis=a.axis;
+                if (a.space==TransformSpace::Local)
+                    rotationAxis=initial*rotationAxis;
+                else if (a.space==TransformSpace::World)
+                    rotationAxis=glm::inverse(inherited)*rotationAxis;
                 rotationAnchor=a.pivot;
             }
         }
         glm::vec3 scaleShift=scalePivot*(glm::vec3(1)-scale);
         glm::vec3 rotationPivot=initial*(AnchorPoint(rotationAnchor)*s.size*scale+scaleShift);
-        glm::quat rotation=glm::angleAxis(glm::radians(glm::mod(angle,360.0f)), initial*rotationAxis);
+        glm::quat rotation=glm::angleAxis(glm::radians(glm::mod(angle,360.0f)), rotationAxis);
         s.worldRotation=inherited*rotation*initial;
         s.frame=glm::translate(glm::mat4(1),origin)*glm::mat4_cast(inherited)
             *glm::translate(glm::mat4(1),rotationPivot)*glm::mat4_cast(rotation)
@@ -826,25 +866,27 @@ void BuildTank()
     // 6-1. 도형 생성: (고유ID, 파트, 초기중심/접점기준위치, 전체크기, 색상)
     // 같은 Random(파트번호)는 같은 랜덤색을 사용합니다.
     scene.Add(Box(WHEEL_LEFT,WHEELS,
-        {-(LOWER_WIDTH+LOWER_GAP)*.5f,LOWER_HEIGHT*.5f,0},
-        {LOWER_WIDTH,LOWER_HEIGHT,LOWER_DEPTH},Color::Random(WHEELS)));
+        {-0.26f,0,0},
+        {0.26f,0.24f,0.90f},Color::Random(WHEELS)));
     scene.Add(Box(WHEEL_RIGHT,WHEELS,
-        {(LOWER_WIDTH+LOWER_GAP)*.5f,LOWER_HEIGHT*.5f,0},
-        {LOWER_WIDTH,LOWER_HEIGHT,LOWER_DEPTH},Color::Random(WHEELS)));
+        {0.26f,0,0},
+        {0.26f,0.24f,0.90f},Color::Random(WHEELS)));
     scene.Add(Box(BODY_MAIN,BODY,{0,0,0},
-        {MIDDLE_WIDTH,MIDDLE_HEIGHT,MIDDLE_DEPTH},Color::Random(BODY)));
-    scene.Add(Box(TURRET_LEFT,TURRETS,{-(UPPER_WIDTH+UPPER_GAP)*.5f,0,0},
-        {UPPER_WIDTH,UPPER_HEIGHT,UPPER_DEPTH},Color::Random(TURRETS)));
-    scene.Add(Box(TURRET_RIGHT,TURRETS,{(UPPER_WIDTH+UPPER_GAP)*.5f,0,0},
-        {UPPER_WIDTH,UPPER_HEIGHT,UPPER_DEPTH},Color::Random(TURRETS)));
+        {0.90f,0.12f,0.62f},Color::Random(BODY)));
+    scene.Add(Box(TURRET_LEFT,TURRETS,{-0.22f,0,0},
+        {0.28f,0.22f,0.32f},Color::Random(TURRETS)));
+    scene.Add(Box(TURRET_RIGHT,TURRETS,{0.22f,0,0},
+        {0.28f,0.22f,0.32f},Color::Random(TURRETS)));
     scene.Add(Box(GUN_LEFT,BARRELS,{0,0,0},
-        {BARREL_WIDTH,BARREL_HEIGHT,BARREL_LENGTH},Color::Random(BARRELS)));
+        {0.045f,0.045f,0.40f},Color::Random(BARRELS)));
     scene.Add(Box(GUN_RIGHT,BARRELS,{0,0,0},
-        {BARREL_WIDTH,BARREL_HEIGHT,BARREL_LENGTH},Color::Random(BARRELS)));
+        {0.045f,0.045f,0.40f},Color::Random(BARRELS)));
     scene.Add(Box(POLE_LEFT,POLES,{0,0,0},
-        {POLE_WIDTH,POLE_HEIGHT,POLE_DEPTH},Color::Random(POLES)));
+        {0.035f,0.42f,0.035f},Color::Random(POLES)));
     scene.Add(Box(POLE_RIGHT,POLES,{0,0,0},
-        {POLE_WIDTH,POLE_HEIGHT,POLE_DEPTH},Color::Random(POLES)));
+        {0.035f,0.42f,0.035f},Color::Random(POLES)));
+
+    scene.PlaceOnFloor(Part(WHEELS));
 
     // 6-2. 접점 연결: 부모 신축은 높이만, 부모 이동/회전은 전체 자식에 전달됩니다.
     scene.AttachOnTop(BODY_MAIN,Part(WHEELS));
@@ -866,6 +908,8 @@ void BuildTank()
         1,BARREL_ROTATE_SPEED,BARREL_CYCLE_ANGLE,Mode::Once);
     int rightGun=scene.AddRotation(Id(GUN_RIGHT),GLFW_KEY_G,{0,1,0},Shape::back,
         -1,BARREL_ROTATE_SPEED,BARREL_CYCLE_ANGLE,Mode::Once);
+    // 바깥쪽 전용 보정이 필요 없으면 다음 두 줄을 제거하고 위 방향(+1/-1)을 설정합니다.
+    // 같은 방향은 둘 다 +1, 반대 방향은 +1/-1입니다.
     scene.SetOutwardRotation(leftGun,TURRET_LEFT);
     scene.SetOutwardRotation(rightGun,TURRET_RIGHT);
     scene.AddRotation(Id(POLE_LEFT),GLFW_KEY_P,{1,0,0},Shape::bottom,
