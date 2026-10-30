@@ -20,8 +20,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="TankScene.h"><Filter>헤더 파일</Filter></ClInclude>
-    <ClInclude Include="ShapeMeshes.h"><Filter>헤더 파일</Filter></ClInclude>
     <None Include="vertex.glsl"><Filter>셰이더 파일</Filter></None>
     <None Include="fragment.glsl"><Filter>셰이더 파일</Filter></None>
   </ItemGroup>

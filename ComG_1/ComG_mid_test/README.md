@@ -2,15 +2,15 @@
 
 ## 1. 수정할 파일과 순서
 
-`ComG_mid_test.cpp`의 **1번 설정값**, **2번 파트/ID**, **3번 BuildTank()**를 주로 수정합니다.
+`ComG_mid_test.cpp`의 **1번 설정값**, **5번 파트/ID**, **6번 BuildTank()**를 주로 수정합니다.
 
 | 파일 | 역할 |
 |---|---|
-| `ComG_mid_test.cpp` | 설정, 탱크 조립 예제, 카메라, 입력, 그리기 |
-| `TankScene.h` | 도형 클래스, 연결, 신축·회전·이동 기능 |
-| `ShapeMeshes.h` | 다섯 종류 도형의 삼각형 정점 생성 |
+| `ComG_mid_test.cpp` | 설정, 도형 자료형, 연결·애니메이션, 메시 생성, 탱크 조립, 카메라·입력·그리기 전체 |
 | `vertex.glsl`, `fragment.glsl` | 모든 도형이 공유하는 변환·색상 셰이더 |
 | `SceneTests.cpp`, `SceneTests.vcxproj` | 연결·동작·렌더링 검증용 별도 프로젝트 |
+
+프로그램 구현은 `ComG_mid_test.cpp` 한 파일 안에 있습니다. 도형과 동작을 위한 별도 사용자 헤더는 없으며, 구조체·enum·클래스도 같은 CPP에 선언되어 있습니다. 검증용 `SceneTests.cpp`는 별도 테스트 실행 파일용으로 실제 프로그램 빌드에는 포함되지 않습니다. 셰이더만 기존처럼 별도 GLSL 파일을 사용합니다.
 
 `BuildTank()`에서는 다음 순서를 지킵니다.
 
