@@ -19,4 +19,11 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="TankScene.h"><Filter>헤더 파일</Filter></ClInclude>
+    <ClInclude Include="ShapeMeshes.h"><Filter>헤더 파일</Filter></ClInclude>
+    <None Include="vertex.glsl"><Filter>셰이더 파일</Filter></None>
+    <None Include="fragment.glsl"><Filter>셰이더 파일</Filter></None>
+  </ItemGroup>
+  <ItemGroup><Filter Include="셰이더 파일"><UniqueIdentifier>{d082c47b-4009-4f10-953a-195dfb1d20b0}</UniqueIdentifier></Filter></ItemGroup>
 </Project>

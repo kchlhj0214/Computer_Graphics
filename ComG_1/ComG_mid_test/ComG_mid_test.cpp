@@ -1,21 +1,16 @@
-﻿//프로젝트속성->링커->명령줄에다음과같이3개의라이브러리추가
-//-> opengl32.lib glew32.lib glfw3.lib glu32.lib
-
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GL/glfw3.h>
-#include <GL/glm/glm/glm.hpp>
-#include <GL/glm/glm/ext.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <vector>
-#include <random>
+#include "TankScene.h"
+#include "ShapeMeshes.h"
 using namespace std;
 
-// ===========================================================================
-// 1. 설정값 - 창과 카메라
-// ===========================================================================
+// ============================================================================
+// 1. 프로그램 설정: 크기, 속도, 카메라 설정은 여기에서 수정합니다.
+// ============================================================================
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
 #define CAMERA_X 2.8f
@@ -70,7 +65,6 @@ using namespace std;
 #define TANK_MOVE_SPEED 0.65f
 #define LOWER_SCALE_MIN 0.50f
 #define LOWER_SCALE_MAX 1.50f
-#define LOWER_CYCLE_SPEED 1.8f
 #define MIDDLE_ROTATE_SPEED 90.0f
 #define BARREL_ROTATE_SPEED 90.0f
 #define POLE_ROTATE_SPEED 120.0f
@@ -81,266 +75,405 @@ using namespace std;
 #define COLOR_MIN 0.10f
 #define COLOR_MAX 0.90f
 
-// ===========================================================================
-// 2. 현재 상태와 OpenGL 변수
-// ===========================================================================
-glm::vec3 tankPosition(0), cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
-glm::vec3 cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
-glm::vec3 colors[5], initialColors[5];
-mt19937 randomEngine(random_device{}());
-uniform_real_distribution<float> randomColor(COLOR_MIN, COLOR_MAX);
-float lowerPhase = 0, middleAngle = 0, barrelAngle = 0, poleAngle = 0;
-float middleRemaining = 0, barrelRemaining = 0, poleRemaining = 0;
-float swapProgress = 0, upperSide = 1, barrelDirection = -1;
-bool lowerChanging = false, swapping = false, dragging = false;
-int cameraSpin = 0, cameraOrbit = 0;
-double previousMouseX = 0, previousMouseY = 0;
-GLuint programID = 0, vao = 0, vbo = 0;
-GLint modelLocation, viewLocation, projectionLocation, colorLocation;
 
-// ===========================================================================
-// 3. 함수 선언
-// ===========================================================================
+#define MESH_SLICES 32
+#define MESH_STACKS 20
+#define LOWER_SCALE_SPEED 0.60f
+
+// ============================================================================
+// 2. 파트와 도형 ID: 숫자는 식별용이며, 높이/부모 순서는 Attach로 지정합니다.
+// ============================================================================
+enum TankPart { WHEELS, BODY, TURRETS, BARRELS, POLES };
+enum ShapeId { WHEEL_LEFT=10, WHEEL_RIGHT=11, BODY_MAIN=20,
+    TURRET_LEFT=30, TURRET_RIGHT=31, GUN_LEFT=40, GUN_RIGHT=41,
+    POLE_LEFT=50, POLE_RIGHT=51 };
+
+TankScene scene;
+glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z);
+glm::vec3 cameraTarget(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
+glm::vec3 cameraUp(0,1,0);
+bool dragging=false;
+int cameraSpin=0, cameraOrbit=0;
+double previousMouseX=0, previousMouseY=0;
+GLuint programID=0, vao=0, vbo=0;
+GLint modelLocation, viewLocation, projectionLocation, colorLocation;
+struct MeshRange { int first, count; };
+map<ShapeKind,MeshRange> meshRanges;
+
+// ============================================================================
+// 3. 탱크 조립 및 기능 설정: 실습 때 주로 이 함수만 바꾸면 됩니다.
+// ============================================================================
+
+// BuildTank(): 도형 생성 -> 연결 -> 기능 부여 -> Seal 순서로 설정합니다.
+// 종류만 Box에서 Cylinder/Sphere/Cone/Pyramid로 바꿔도 같은 기능을 사용할 수 있습니다.
+void BuildTank()
+{
+    scene.colorMin=COLOR_MIN;
+    scene.colorMax=COLOR_MAX;
+
+    // 3-1. 도형 생성: (고유ID, 파트, 초기중심/접점기준위치, 전체크기, 색상)
+    // 같은 Random(파트번호)는 같은 랜덤색을 사용합니다.
+    scene.Add(Box(WHEEL_LEFT,WHEELS,
+        {-(LOWER_WIDTH+LOWER_GAP)*.5f,LOWER_HEIGHT*.5f,0},
+        {LOWER_WIDTH,LOWER_HEIGHT,LOWER_DEPTH},Color::Random(WHEELS)));
+    scene.Add(Box(WHEEL_RIGHT,WHEELS,
+        {(LOWER_WIDTH+LOWER_GAP)*.5f,LOWER_HEIGHT*.5f,0},
+        {LOWER_WIDTH,LOWER_HEIGHT,LOWER_DEPTH},Color::Random(WHEELS)));
+    scene.Add(Box(BODY_MAIN,BODY,{0,0,0},
+        {MIDDLE_WIDTH,MIDDLE_HEIGHT,MIDDLE_DEPTH},Color::Random(BODY)));
+    scene.Add(Box(TURRET_LEFT,TURRETS,{-(UPPER_WIDTH+UPPER_GAP)*.5f,0,0},
+        {UPPER_WIDTH,UPPER_HEIGHT,UPPER_DEPTH},Color::Random(TURRETS)));
+    scene.Add(Box(TURRET_RIGHT,TURRETS,{(UPPER_WIDTH+UPPER_GAP)*.5f,0,0},
+        {UPPER_WIDTH,UPPER_HEIGHT,UPPER_DEPTH},Color::Random(TURRETS)));
+    scene.Add(Box(GUN_LEFT,BARRELS,{0,0,0},
+        {BARREL_WIDTH,BARREL_HEIGHT,BARREL_LENGTH},Color::Random(BARRELS)));
+    scene.Add(Box(GUN_RIGHT,BARRELS,{0,0,0},
+        {BARREL_WIDTH,BARREL_HEIGHT,BARREL_LENGTH},Color::Random(BARRELS)));
+    scene.Add(Box(POLE_LEFT,POLES,{0,0,0},
+        {POLE_WIDTH,POLE_HEIGHT,POLE_DEPTH},Color::Random(POLES)));
+    scene.Add(Box(POLE_RIGHT,POLES,{0,0,0},
+        {POLE_WIDTH,POLE_HEIGHT,POLE_DEPTH},Color::Random(POLES)));
+
+    // 3-2. 접점 연결: 부모 신축은 높이만, 부모 이동/회전은 전체 자식에 전달됩니다.
+    scene.AttachOnTop(BODY_MAIN,Part(WHEELS));
+    scene.Attach(TURRET_LEFT,BODY_MAIN,Shape::bottom,Shape::top);
+    scene.Attach(TURRET_RIGHT,BODY_MAIN,Shape::bottom,Shape::top);
+    scene.Attach(GUN_LEFT,TURRET_LEFT,Shape::back,Shape::center);
+    scene.Attach(GUN_RIGHT,TURRET_RIGHT,Shape::back,Shape::center);
+    scene.Attach(POLE_LEFT,TURRET_LEFT,Shape::bottom,Shape::center);
+    scene.Attach(POLE_RIGHT,TURRET_RIGHT,Shape::bottom,Shape::center);
+
+    // 3-3. 파트 전체 신축: 바퀴 두 개는 한 기능의 동일한 배율을 공유합니다.
+    scene.AddScale(Part(WHEELS),GLFW_KEY_D,{0,1,0},Shape::bottom,
+        LOWER_SCALE_MIN,LOWER_SCALE_MAX,LOWER_SCALE_SPEED,Mode::PingPong);
+
+    // 3-4. 개별 회전: 부모 회전에 더해서 자기 기준점으로 독립 회전합니다.
+    scene.AddRotation(Id(BODY_MAIN),GLFW_KEY_T,{0,1,0},Shape::center,
+        1,MIDDLE_ROTATE_SPEED,MIDDLE_CYCLE_ANGLE,Mode::Once);
+    int leftGun=scene.AddRotation(Id(GUN_LEFT),GLFW_KEY_G,{0,1,0},Shape::back,
+        1,BARREL_ROTATE_SPEED,BARREL_CYCLE_ANGLE,Mode::Once);
+    int rightGun=scene.AddRotation(Id(GUN_RIGHT),GLFW_KEY_G,{0,1,0},Shape::back,
+        -1,BARREL_ROTATE_SPEED,BARREL_CYCLE_ANGLE,Mode::Once);
+    scene.SetOutwardRotation(leftGun,TURRET_LEFT);
+    scene.SetOutwardRotation(rightGun,TURRET_RIGHT);
+    scene.AddRotation(Id(POLE_LEFT),GLFW_KEY_P,{1,0,0},Shape::bottom,
+        -1,POLE_ROTATE_SPEED,POLE_CYCLE_ANGLE,Mode::Once);
+    scene.AddRotation(Id(POLE_RIGHT),GLFW_KEY_P,{1,0,0},Shape::bottom,
+        1,POLE_ROTATE_SPEED,POLE_CYCLE_ANGLE,Mode::Once);
+
+    // 3-5. 위치 교환: 각 상부에 연결한 포신과 깃대도 함께 이동합니다.
+    scene.AddSwap(TURRET_LEFT,TURRET_RIGHT,GLFW_KEY_L,SWAP_DURATION);
+
+    // 추가 예시 (필요할 때 주석 해제): u 키로 상부 파트 전체를 X방향 0.2만큼 왕복.
+    // scene.AddMovement(Part(TURRETS),GLFW_KEY_U,{1,0,0},.2f,.1f,Mode::PingPong);
+    scene.Seal();
+}
+
+// ============================================================================
+// 4. 함수 선언
+// ============================================================================
 string ReadFile(const char* name);
 bool InitShader();
-void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color);
 void DrawScene();
-void UpdateScene(GLFWwindow* window, float dt);
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-void MouseCallback(GLFWwindow* window, int button, int action, int mods);
-void CursorCallback(GLFWwindow* window, double x, double y);
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+void UpdateScene(GLFWwindow* window,float dt);
+void KeyCallback(GLFWwindow* window,int key,int scancode,int action,int mods);
+void MouseCallback(GLFWwindow* window,int button,int action,int mods);
+void CursorCallback(GLFWwindow* window,double x,double y);
+void ScrollCallback(GLFWwindow* window,double xoffset,double yoffset);
 
-// ===========================================================================
-// 4. 초기화와 메인 반복문
-// ===========================================================================
+// ============================================================================
+// 5. 초기화 / 메인 반복문 / 종료
+// ============================================================================
+
+// main(): 공통 메시를 한 번 생성하고, 매 프레임 입력 -> 애니메이션 -> 그리기를 수행합니다.
 int main()
 {
-	if (!glfwInit())return -1;
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE); glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Midterm Tank", nullptr, nullptr);
-	if (!window) { glfwTerminate(); return -1; }
-	glfwMakeContextCurrent(window); glewExperimental = GL_TRUE;
-	if (glewInit() != GLEW_OK || !InitShader()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
-	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
-	glfwSetKeyCallback(window, KeyCallback); glfwSetMouseButtonCallback(window, MouseCallback);
-	glfwSetCursorPosCallback(window, CursorCallback); glfwSetScrollCallback(window, ScrollCallback);
-	glm::vec3 corners[] = { {-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},
-		{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f} };
-	int indices[] = { 0,2,1,0,3,2, 4,5,6,4,6,7, 0,4,7,0,7,3,
-		1,2,6,1,6,5, 3,7,6,3,6,2, 0,1,5,0,5,4 };
-	vector<glm::vec3> vertices;
-	for (int index : indices)vertices.push_back(corners[index]);
-	glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo); glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr); glEnableVertexAttribArray(0); glBindVertexArray(0);
-	for (int i = 0; i < 5; ++i)initialColors[i] = colors[i] = glm::vec3(randomColor(randomEngine), randomColor(randomEngine), randomColor(randomEngine));
-	cout << "Arrows: tank | x/X, z/Z: camera | d: height | t: middle | l: swap | g: barrels | p: poles\n"
-		<< "y/Y: camera spin | r/R: orbit origin | drag/wheel: camera | o: colors | c: reset | q: quit" << endl;
-	double previousTime = glfwGetTime();
-	while (!glfwWindowShouldClose(window)) {
-		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
-		UpdateScene(window, dt);
-		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
-		DrawScene(); glfwSwapBuffers(window);
-	}
-	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
-	glfwDestroyWindow(window); glfwTerminate(); return 0;
+    if (!glfwInit())
+        return -1;
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_COMPAT_PROFILE);
+    glfwWindowHint(GLFW_RESIZABLE,GLFW_FALSE);
+    GLFWwindow* window=glfwCreateWindow(WINDOW_WIDTH,WINDOW_HEIGHT,"Midterm Tank Builder",nullptr,nullptr);
+    if (!window)
+    {
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+    glewExperimental=GL_TRUE;
+    if (glewInit()!=GLEW_OK || !InitShader())
+    {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+    glfwSwapInterval(1);
+    glEnable(GL_DEPTH_TEST);
+    glfwSetKeyCallback(window,KeyCallback);
+    glfwSetMouseButtonCallback(window,MouseCallback);
+    glfwSetCursorPosCallback(window,CursorCallback);
+    glfwSetScrollCallback(window,ScrollCallback);
+
+    int result=0;
+    try
+    {
+        BuildTank();
+        vector<glm::vec3> vertices;
+        for (ShapeKind kind : {ShapeKind::Box,ShapeKind::Cone,ShapeKind::Cylinder,ShapeKind::Sphere,ShapeKind::Pyramid})
+        {
+            auto mesh=MakeMesh(kind,MESH_SLICES,MESH_STACKS);
+            meshRanges[kind]={(int)vertices.size(),(int)mesh.size()};
+            vertices.insert(vertices.end(),mesh.begin(),mesh.end());
+        }
+        glGenVertexArrays(1,&vao);
+        glGenBuffers(1,&vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER,vbo);
+        glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(glm::vec3),vertices.data(),GL_STATIC_DRAW);
+        glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(glm::vec3),nullptr);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+        cout << "Arrows: tank | d: scale | t/g/p: rotate | l: swap | x/X,z/Z: camera\n"
+             << "y/Y: spin | r/R: orbit | drag/wheel: camera | o: colors | c: reset | q: quit" << endl;
+        double previousTime=glfwGetTime();
+        while (!glfwWindowShouldClose(window))
+        {
+            glfwPollEvents();
+            double now=glfwGetTime();
+            float dt=(float)glm::min(now-previousTime,0.1);
+            previousTime=now;
+            UpdateScene(window,dt);
+            int width,height;
+            glfwGetFramebufferSize(window,&width,&height);
+            glViewport(0,0,width,height);
+            DrawScene();
+            glfwSwapBuffers(window);
+        }
+    }
+    catch (const exception& error)
+    {
+        cerr << "Tank configuration error: " << error.what() << endl;
+        result=-1;
+    }
+    glDeleteBuffers(1,&vbo);
+    glDeleteVertexArrays(1,&vao);
+    glDeleteProgram(programID);
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return result;
 }
 
-// ===========================================================================
-// 5. 이동과 애니메이션 처리
-// ===========================================================================
-void UpdateScene(GLFWwindow* window, float dt)
+// ============================================================================
+// 6. 매 프레임 처리
+// ============================================================================
+
+// UpdateScene(window,dt): 탱크/카메라 연속 입력과 등록한 기능들을 처리합니다.
+void UpdateScene(GLFWwindow* window,float dt)
 {
-	glm::vec3 movement(0), cameraMovement(0);
-	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)movement.x -= 1;
-	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)movement.x += 1;
-	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)movement.z -= 1;
-	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)movement.z += 1;
-	if (glm::length(movement) > 0)tankPosition += glm::normalize(movement) * TANK_MOVE_SPEED * dt;
-	// 회전하는 부품까지 포함한 범위로 바닥 경계를 제한합니다.
-	float extent = glm::max(LOWER_WIDTH + LOWER_GAP * .5f, LOWER_DEPTH * .5f);
-	extent = glm::max(extent, glm::length(glm::vec2(MIDDLE_WIDTH, MIDDLE_DEPTH)) * .5f);
-	float upperReach = glm::max(glm::length(glm::vec2(UPPER_WIDTH, UPPER_DEPTH)) * .5f,
-		glm::max(glm::length(glm::vec2(BARREL_LENGTH, BARREL_WIDTH * .5f)), glm::length(glm::vec2(POLE_HEIGHT, POLE_DEPTH * .5f))));
-	extent = glm::max(extent, (UPPER_WIDTH + UPPER_GAP) * .5f + upperReach);
-	float limitX = glm::max(0.0f, FLOOR_WIDTH * .5f - extent), limitZ = glm::max(0.0f, FLOOR_DEPTH * .5f - extent);
-	tankPosition.x = glm::clamp(tankPosition.x, -limitX, limitX); tankPosition.z = glm::clamp(tankPosition.z, -limitZ, limitZ);
-	// 소문자: 양의 방향, Shift + 문자: 음의 방향 (월드 좌표 기준)
-	bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
-		|| glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-	float moveDirection = shift ? -1.0f : 1.0f;
-	if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)cameraMovement.x += moveDirection;
-	if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)cameraMovement.z += moveDirection;
-	if (glm::length(cameraMovement) > 0) {
-		cameraMovement = glm::normalize(cameraMovement) * CAMERA_MOVE_SPEED * dt;
-		cameraPosition += cameraMovement; cameraTarget += cameraMovement;
-	}
-	if (cameraOrbit) {
-		glm::mat4 rotation = glm::rotate(glm::mat4(1), glm::radians(cameraOrbit * CAMERA_ROTATE_SPEED * dt), glm::vec3(0, 1, 0));
-		cameraPosition = glm::vec3(rotation * glm::vec4(cameraPosition, 1));
-		cameraTarget = glm::vec3(rotation * glm::vec4(cameraTarget, 1));
-	}
-	if (cameraSpin) {
-		glm::mat4 rotation = glm::rotate(glm::mat4(1), glm::radians(cameraSpin * CAMERA_ROTATE_SPEED * dt), glm::vec3(0, 1, 0));
-		cameraTarget = cameraPosition + glm::vec3(rotation * glm::vec4(cameraTarget - cameraPosition, 0));
-	}
-	if (lowerChanging)lowerPhase = glm::mod(lowerPhase + LOWER_CYCLE_SPEED * dt, glm::two_pi<float>());
-	float step = glm::min(middleRemaining, MIDDLE_ROTATE_SPEED * dt);
-	middleAngle = glm::mod(middleAngle + step, 360.0f); middleRemaining -= step;
-	step = glm::min(barrelRemaining, BARREL_ROTATE_SPEED * dt);
-	barrelAngle = glm::mod(barrelAngle + barrelDirection * step, 360.0f); barrelRemaining -= step;
-	step = glm::min(poleRemaining, POLE_ROTATE_SPEED * dt);
-	poleAngle = glm::mod(poleAngle + step, 360.0f); poleRemaining -= step;
-	if (swapping) {
-		swapProgress = glm::min(swapProgress + dt / SWAP_DURATION, 1.0f);
-		if (swapProgress >= 1) { upperSide = -upperSide; swapProgress = 0; swapping = false; }
-	}
+    glm::vec3 movement(0),cameraMovement(0);
+    if (glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)
+        movement.x-=1;
+    if (glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)
+        movement.x+=1;
+    if (glfwGetKey(window,GLFW_KEY_UP)==GLFW_PRESS)
+        movement.z-=1;
+    if (glfwGetKey(window,GLFW_KEY_DOWN)==GLFW_PRESS)
+        movement.z+=1;
+    if (glm::length(movement)>0)
+        scene.position+=glm::normalize(movement)*TANK_MOVE_SPEED*dt;
+    bool shift=glfwGetKey(window,GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS
+        || glfwGetKey(window,GLFW_KEY_RIGHT_SHIFT)==GLFW_PRESS;
+    float direction=shift ? -1.0f : 1.0f;
+    if (glfwGetKey(window,GLFW_KEY_X)==GLFW_PRESS)
+        cameraMovement.x+=direction;
+    if (glfwGetKey(window,GLFW_KEY_Z)==GLFW_PRESS)
+        cameraMovement.z+=direction;
+    if (glm::length(cameraMovement)>0)
+    {
+        cameraMovement=glm::normalize(cameraMovement)*CAMERA_MOVE_SPEED*dt;
+        cameraPosition+=cameraMovement;
+        cameraTarget+=cameraMovement;
+    }
+    if (cameraOrbit)
+    {
+        glm::mat4 rotation=glm::rotate(glm::mat4(1),glm::radians(cameraOrbit*CAMERA_ROTATE_SPEED*dt),glm::vec3(0,1,0));
+        cameraPosition=glm::vec3(rotation*glm::vec4(cameraPosition,1));
+        cameraTarget=glm::vec3(rotation*glm::vec4(cameraTarget,1));
+        cameraUp=glm::vec3(rotation*glm::vec4(cameraUp,0));
+    }
+    if (cameraSpin)
+    {
+        // 카메라 자신의 위쪽 축으로 제자리 회전합니다.
+        glm::vec3 forward=glm::normalize(cameraTarget-cameraPosition);
+        glm::vec3 right=glm::normalize(glm::cross(forward,cameraUp));
+        glm::vec3 up=glm::normalize(glm::cross(right,forward));
+        glm::mat4 rotation=glm::rotate(glm::mat4(1),glm::radians(cameraSpin*CAMERA_ROTATE_SPEED*dt),up);
+        cameraTarget=cameraPosition+glm::vec3(rotation*glm::vec4(cameraTarget-cameraPosition,0));
+        cameraUp=up;
+    }
+    scene.Update(dt);
+    scene.KeepOnFloor(FLOOR_WIDTH,FLOOR_DEPTH);
 }
 
-// ===========================================================================
-// 6. 도형 그리기
-// ===========================================================================
-void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color)
-{
-	glm::mat4 transform = glm::scale(model, size);
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(transform));
-	glUniform3fv(colorLocation, 1, glm::value_ptr(color));
-	glBindVertexArray(vao); glDrawArrays(GL_TRIANGLES, 0, 36); glBindVertexArray(0);
-}
+// ============================================================================
+// 7. 공통 셰이더로 그리기
+// ============================================================================
 
+// DrawScene(): 도형 종류에 맞는 메시 구간만 바꾸고, 변환/색상은 같은 uniform으로 전달합니다.
 void DrawScene()
 {
-	glClearColor(1, 1, 1, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); glUseProgram(programID);
-	glm::mat4 view = glm::lookAt(cameraPosition, cameraTarget, glm::vec3(0, 1, 0));
-	glm::mat4 projection = glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR);
-	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view)); glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
-	DrawBox(glm::translate(glm::mat4(1), glm::vec3(0, -FLOOR_HEIGHT * .5f, 0)),
-		glm::vec3(FLOOR_WIDTH, FLOOR_HEIGHT, FLOOR_DEPTH), glm::vec3(FLOOR_RED, FLOOR_GREEN, FLOOR_BLUE));
-	float lowerHeight = LOWER_HEIGHT * glm::mix(LOWER_SCALE_MIN, LOWER_SCALE_MAX, (glm::sin(lowerPhase) + 1) * .5f);
-	float middleBottom = lowerHeight;
-	glm::mat4 base = glm::translate(glm::mat4(1), tankPosition);
-	for (int i = 0; i < 2; ++i) {
-		float side = i == 0 ? -1.0f : 1.0f;
-		DrawBox(glm::translate(base, glm::vec3(side * (LOWER_WIDTH + LOWER_GAP) * .5f, lowerHeight * .5f, 0)),
-			glm::vec3(LOWER_WIDTH, lowerHeight, LOWER_DEPTH), colors[0]);
-	}
-	glm::mat4 middle = glm::translate(base, glm::vec3(0, middleBottom + MIDDLE_HEIGHT * .5f, 0));
-	middle = glm::rotate(middle, glm::radians(middleAngle), glm::vec3(0, 1, 0));
-	DrawBox(middle, glm::vec3(MIDDLE_WIDTH, MIDDLE_HEIGHT, MIDDLE_DEPTH), colors[1]);
-	for (int i = 0; i < 2; ++i) {
-		float side = i == 0 ? -1.0f : 1.0f;
-		float x = side * upperSide * (1 - 2 * swapProgress) * (UPPER_WIDTH + UPPER_GAP) * .5f;
-		// 중앙 몸체의 회전과 높이를 상속합니다.
-		glm::mat4 upper = glm::translate(middle, glm::vec3(x, (MIDDLE_HEIGHT + UPPER_HEIGHT) * .5f, 0));
-		DrawBox(upper, glm::vec3(UPPER_WIDTH, UPPER_HEIGHT, UPPER_DEPTH), colors[2]);
-		// 상부 몸체 내부를 기준점으로 삼아 회전 중에도 연결을 유지합니다.
-		glm::mat4 barrel = glm::rotate(upper, glm::radians(side * barrelAngle), glm::vec3(0, 1, 0));
-		barrel = glm::translate(barrel, glm::vec3(0, 0, -BARREL_LENGTH * .5f));
-		DrawBox(barrel, glm::vec3(BARREL_WIDTH, BARREL_HEIGHT, BARREL_LENGTH), colors[3]);
-		glm::mat4 pole = glm::rotate(upper, glm::radians(side * poleAngle), glm::vec3(1, 0, 0));
-		pole = glm::translate(pole, glm::vec3(0, POLE_HEIGHT * .5f, 0));
-		DrawBox(pole, glm::vec3(POLE_WIDTH, POLE_HEIGHT, POLE_DEPTH), colors[4]);
-	}
+    glClearColor(1,1,1,1);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glUseProgram(programID);
+    glm::mat4 view=glm::lookAt(cameraPosition,cameraTarget,cameraUp);
+    glm::mat4 projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),PERSPECTIVE_ASPECT,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view));
+    glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
+    glBindVertexArray(vao);
+    glm::mat4 floor=glm::scale(glm::translate(glm::mat4(1),glm::vec3(0,-FLOOR_HEIGHT*.5f,0)),
+        glm::vec3(FLOOR_WIDTH,FLOOR_HEIGHT,FLOOR_DEPTH));
+    glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(floor));
+    glUniform3f(colorLocation,FLOOR_RED,FLOOR_GREEN,FLOOR_BLUE);
+    glDrawArrays(GL_TRIANGLES,meshRanges.at(ShapeKind::Box).first,meshRanges.at(ShapeKind::Box).count);
+    for (const auto& [id,shape] : scene.shapes)
+    {
+        glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(shape.geometry));
+        glUniform3fv(colorLocation,1,glm::value_ptr(shape.color.value));
+        MeshRange range=meshRanges.at(shape.kind);
+        glDrawArrays(GL_TRIANGLES,range.first,range.count);
+    }
+    glBindVertexArray(0);
 }
 
-// ===========================================================================
-// 7. 키보드 입력
-// ===========================================================================
-void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
+// ============================================================================
+// 8. 키보드와 마우스 입력
+// ============================================================================
+
+// KeyCallback: 등록한 키는 scene.Trigger(key)로 전달합니다. 기능 추가 시 이 함수는 수정하지 않습니다.
+void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
 {
-	if (action != GLFW_PRESS)return;
-	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
-	if (key == GLFW_KEY_D)lowerChanging = !lowerChanging;
-	if (key == GLFW_KEY_T && middleRemaining == 0)middleRemaining = MIDDLE_CYCLE_ANGLE;
-	if (key == GLFW_KEY_G && barrelRemaining == 0) {
-		// 현재 위치와 방향을 기준으로 항상 바깥쪽 180도 회전을 선택합니다.
-		float currentSide = upperSide * (1 - 2 * swapProgress);
-		barrelDirection = currentSide * glm::cos(glm::radians(barrelAngle)) >= 0 ? -1.0f : 1.0f;
-		barrelRemaining = BARREL_CYCLE_ANGLE;
-	}
-	if (key == GLFW_KEY_P && poleRemaining == 0)poleRemaining = POLE_CYCLE_ANGLE;
-	if (key == GLFW_KEY_L && !swapping) { swapping = true; swapProgress = 0; }
-	int direction = (mods & GLFW_MOD_SHIFT) ? 1 : -1;
-	if (key == GLFW_KEY_Y)cameraSpin = cameraSpin == direction ? 0 : direction;
-	if (key == GLFW_KEY_R)cameraOrbit = cameraOrbit == direction ? 0 : direction;
-	if (key == GLFW_KEY_O)
-		for (glm::vec3& color : colors)color = glm::vec3(randomColor(randomEngine), randomColor(randomEngine), randomColor(randomEngine));
-	if (key == GLFW_KEY_C) {
-		tankPosition = glm::vec3(0); cameraPosition = glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z);
-		cameraTarget = glm::vec3(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
-		lowerPhase = middleAngle = barrelAngle = poleAngle = 0;
-		middleRemaining = barrelRemaining = poleRemaining = swapProgress = 0; upperSide = 1; barrelDirection = -1;
-		lowerChanging = swapping = dragging = false; cameraSpin = cameraOrbit = 0;
-		for (int i = 0; i < 5; ++i)colors[i] = initialColors[i];
-	}
+    if (action!=GLFW_PRESS)
+        return;
+    scene.Trigger(key);
+    if (key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)
+        glfwSetWindowShouldClose(window,true);
+    int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
+    if (key==GLFW_KEY_Y)
+        cameraSpin=cameraSpin==direction ? 0 : direction;
+    if (key==GLFW_KEY_R)
+        cameraOrbit=cameraOrbit==direction ? 0 : direction;
+    if (key==GLFW_KEY_O)
+        scene.RandomizeColors();
+    if (key==GLFW_KEY_C)
+    {
+        scene.Reset();
+        cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
+        cameraTarget={CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z};
+        cameraSpin=cameraOrbit=0;
+        cameraUp={0,1,0};
+        dragging=false;
+    }
 }
 
-// ===========================================================================
-// 8. 마우스 오비트와 확대/축소
-// ===========================================================================
-void MouseCallback(GLFWwindow* window, int button, int action, int)
+// MouseCallback: 좌클릭을 놓아도 현재 시점을 유지합니다.
+void MouseCallback(GLFWwindow* window,int button,int action,int)
 {
-	if (button != GLFW_MOUSE_BUTTON_LEFT)return;
-	dragging = action == GLFW_PRESS;
-	if (dragging)glfwGetCursorPos(window, &previousMouseX, &previousMouseY);
+    if (button!=GLFW_MOUSE_BUTTON_LEFT)
+        return;
+    dragging=action==GLFW_PRESS;
+    if (dragging)
+        glfwGetCursorPos(window,&previousMouseX,&previousMouseY);
 }
 
-void CursorCallback(GLFWwindow* window, double x, double y)
+// CursorCallback: 주시점을 중심으로 드래그 회전합니다. 창 전체 너비가 ORBIT_DEGREES입니다.
+void CursorCallback(GLFWwindow* window,double x,double y)
 {
-	if (!dragging)return;
-	int width, height; glfwGetWindowSize(window, &width, &height); if (width <= 0 || height <= 0)return;
-	glm::vec3 offset = cameraPosition - cameraTarget; float radius = glm::length(offset);
-	float yaw = glm::atan(offset.x, offset.z), pitch = glm::asin(glm::clamp(offset.y / radius, -1.0f, 1.0f));
-	yaw -= glm::radians(ORBIT_DEGREES) * (float)(x - previousMouseX) / width;
-	pitch += glm::radians(ORBIT_DEGREES) * (float)(y - previousMouseY) / height;
-	previousMouseX = x; previousMouseY = y;
-	pitch = glm::clamp(pitch, -glm::radians(ORBIT_PITCH_LIMIT), glm::radians(ORBIT_PITCH_LIMIT));
-	cameraPosition = cameraTarget + radius * glm::vec3(glm::cos(pitch) * glm::sin(yaw), glm::sin(pitch), glm::cos(pitch) * glm::cos(yaw));
+    if (!dragging)
+        return;
+    int width,height;
+    glfwGetWindowSize(window,&width,&height);
+    if (width<=0 || height<=0)
+        return;
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::length(offset);
+    float yaw=glm::atan(offset.x,offset.z);
+    float pitch=glm::asin(glm::clamp(offset.y/radius,-1.0f,1.0f));
+    yaw-=glm::radians(ORBIT_DEGREES)*(float)(x-previousMouseX)/width;
+    pitch+=glm::radians(ORBIT_DEGREES)*(float)(y-previousMouseY)/height;
+    previousMouseX=x;
+    previousMouseY=y;
+    cameraUp={0,1,0};
+    pitch=glm::clamp(pitch,-glm::radians(ORBIT_PITCH_LIMIT),glm::radians(ORBIT_PITCH_LIMIT));
+    cameraPosition=cameraTarget+radius*glm::vec3(glm::cos(pitch)*glm::sin(yaw),glm::sin(pitch),glm::cos(pitch)*glm::cos(yaw));
 }
 
-void ScrollCallback(GLFWwindow*, double, double yoffset)
+// ScrollCallback: 주시점까지 거리를 조절합니다. 상하한은 define으로 설정합니다.
+void ScrollCallback(GLFWwindow*,double,double yoffset)
 {
-	glm::vec3 offset = cameraPosition - cameraTarget;
-	float radius = glm::clamp(glm::length(offset) - (float)yoffset * ZOOM_STEP, CAMERA_RADIUS_MIN, CAMERA_RADIUS_MAX);
-	cameraPosition = cameraTarget + glm::normalize(offset) * radius;
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::clamp(glm::length(offset)-(float)yoffset*ZOOM_STEP,CAMERA_RADIUS_MIN,CAMERA_RADIUS_MAX);
+    cameraPosition=cameraTarget+glm::normalize(offset)*radius;
 }
 
-// ===========================================================================
-// 9. 셰이더 파일 로딩과 프로그램 생성
-// ===========================================================================
+// ============================================================================
+// 9. 셰이더 파일 로딩과 컴파일
+// ============================================================================
+
+// ReadFile(name): 프로젝트의 GLSL 파일을 읽습니다. 실패하면 빈 문자열을 반환합니다.
 string ReadFile(const char* name)
 {
-	ifstream file(name);
-	if (!file) { cerr << "Cannot open shader: " << name << endl; return ""; }
-	stringstream stream; stream << file.rdbuf(); return stream.str();
+    ifstream file(name);
+    if (!file)
+    {
+        cerr << "Cannot open shader: " << name << endl;
+        return "";
+    }
+    stringstream stream;
+    stream << file.rdbuf();
+    return stream.str();
 }
 
+// InitShader(): 모든 도형이 사용하는 공통 셰이더 프로그램을 한 번 생성합니다.
 bool InitShader()
 {
-	string sources[2] = { ReadFile("vertex.glsl"), ReadFile("fragment.glsl") };
-	if (sources[0].empty() || sources[1].empty()) return false;
-	GLuint shaders[2] = { glCreateShader(GL_VERTEX_SHADER), glCreateShader(GL_FRAGMENT_SHADER) };
-	for (int i = 0; i < 2; ++i) {
-		const char* code = sources[i].c_str(); glShaderSource(shaders[i], 1, &code, nullptr);
-		glCompileShader(shaders[i]); GLint ok; glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &ok);
-		if (!ok) { char log[1024]; glGetShaderInfoLog(shaders[i], 1024, nullptr, log); cerr << log << endl; return false; }
-	}
-	programID = glCreateProgram();
-	glAttachShader(programID, shaders[0]); glAttachShader(programID, shaders[1]); glLinkProgram(programID);
-	GLint ok; glGetProgramiv(programID, GL_LINK_STATUS, &ok);
-	if (!ok) { char log[1024]; glGetProgramInfoLog(programID, 1024, nullptr, log); cerr << log << endl; return false; }
-	glDeleteShader(shaders[0]); glDeleteShader(shaders[1]);
-	modelLocation = glGetUniformLocation(programID, "modelTransform");
-	viewLocation = glGetUniformLocation(programID, "viewTransform");
-	projectionLocation = glGetUniformLocation(programID, "projectionTransform");
-	colorLocation = glGetUniformLocation(programID, "uColor");
-	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
+    string sources[2]={ReadFile("vertex.glsl"),ReadFile("fragment.glsl")};
+    if (sources[0].empty() || sources[1].empty())
+        return false;
+    GLuint shaders[2]={glCreateShader(GL_VERTEX_SHADER),glCreateShader(GL_FRAGMENT_SHADER)};
+    for (int i=0; i<2; ++i)
+    {
+        const char* code=sources[i].c_str();
+        glShaderSource(shaders[i],1,&code,nullptr);
+        glCompileShader(shaders[i]);
+        GLint ok;
+        glGetShaderiv(shaders[i],GL_COMPILE_STATUS,&ok);
+        if (!ok)
+        {
+            char log[1024];
+            glGetShaderInfoLog(shaders[i],1024,nullptr,log);
+            cerr << log << endl;
+            return false;
+        }
+    }
+    programID=glCreateProgram();
+    glAttachShader(programID,shaders[0]);
+    glAttachShader(programID,shaders[1]);
+    glLinkProgram(programID);
+    GLint ok;
+    glGetProgramiv(programID,GL_LINK_STATUS,&ok);
+    if (!ok)
+    {
+        char log[1024];
+        glGetProgramInfoLog(programID,1024,nullptr,log);
+        cerr << log << endl;
+        return false;
+    }
+    glDeleteShader(shaders[0]);
+    glDeleteShader(shaders[1]);
+    modelLocation=glGetUniformLocation(programID,"modelTransform");
+    viewLocation=glGetUniformLocation(programID,"viewTransform");
+    projectionLocation=glGetUniformLocation(programID,"projectionTransform");
+    colorLocation=glGetUniformLocation(programID,"uColor");
+    return modelLocation>=0 && viewLocation>=0 && projectionLocation>=0 && colorLocation>=0;
 }
-
-
-
-
-
