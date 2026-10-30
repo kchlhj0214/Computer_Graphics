@@ -78,31 +78,12 @@ enum class Mode { Once, Loop, PingPong }; // 반복 방식 / 한 사이클, 계�
 enum class Anchor { Center, Left, Right, Bottom, Top, Front, Back }; // 로컬 기준점 / 중심, 왼쪽, 오른쪽, 아래, 위, 앞(-Z), 뒤(+Z)
 enum class ActionKind { Move, Rotate, Scale, Swap }; // 기능 종류 / 이동, 회전, 신축, 위치 교환
 
-enum class TopDirection { X, Y, Z, MinusX, MinusY, MinusZ }; // 생성 시 윗방향 / +X, +Y, +Z, -X, -Y, -Z
-// Local: 도형 초기 자세 기준, Parent: 부모 회전 기준, World: 고정 월드 축 기준
-// 신축 축/기준점은 항상 도형 로컬 좌표이며 이 설정은 이동·회전에만 적용합니다.
 enum class TransformSpace { Local, Parent, World }; // 변환 축 좌표계 / 도형, 부모, 월드
-
-// TopRotation(direction): 원래 +Y인 도형의 윗방향을 지정 축으로 돌립니다.
-// angles가 추가로 있으면 방향 설정 후 부모 좌표의 Euler 회전을 적용합니다.
-glm::quat TopRotation(TopDirection direction)
-{
-    switch (direction)
-    {
-    case TopDirection::X:
-        return glm::angleAxis(glm::radians(-90.0f),glm::vec3(0,0,1));
-    case TopDirection::MinusX:
-        return glm::angleAxis(glm::radians(90.0f),glm::vec3(0,0,1));
-    case TopDirection::Z:
-        return glm::angleAxis(glm::radians(90.0f),glm::vec3(1,0,0));
-    case TopDirection::MinusZ:
-        return glm::angleAxis(glm::radians(-90.0f),glm::vec3(1,0,0));
-    case TopDirection::MinusY:
-        return glm::angleAxis(glm::radians(180.0f),glm::vec3(1,0,0));
-    default:
-        return glm::quat(1,0,0,0);
-    }
-}
+// 신축 축과 접점은 도형 로컬 좌표입니다. 이동·회전에만 TransformSpace를 사용합니다.
+enum class MissingSupport { Floor, KeepPosition }; // 수동 지지대가 없을 때 / 바닥, 생성 위치 유지
+// 생성 각도는 {X회전,Y회전,Z회전}, 단위는 도입니다. 행렬은 Rz * Ry * Rx 순서입니다.
+// 기본 윗방향 +Y를 돌리는 예: +X {0,0,-90}, -X {0,0,90}, +Y {0,0,0},
+// -Y {180,0,0}, +Z {90,0,0}, -Z {-90,0,0}. {25,40,15} 같은 임의 각도도 가능합니다.
 
 // 앞은 -Z, 뒤는 +Z입니다. AnchorPoint(Shape::bottom)는 (0,-0.5,0)입니다.
 inline glm::vec3 AnchorPoint(Anchor a)
@@ -150,12 +131,17 @@ struct Shape
 
     int id, part;
     ShapeKind kind;
-    TopDirection topDirection = TopDirection::Y;
     glm::vec3 position, size, angles{0};
     Color color;
     glm::vec3 initialColor{0};
     int parent = -1;
+    int layer = 0;                 // 0: 자유 도형/부속, 양수: 쌓이는 층 번호
+    int layerMotionParent = -1;    // 층 위치와 별개로 이동·회전을 따라갈 도형(없으면 무시)
+    bool keepLayerContact = true;  // 층 아래쪽을 받침 높이에 맞출지 여부
+    bool visible = true;           // 부모가 없는 부속은 자식까지 숨깁니다.
     std::vector<int> supports;
+    bool supportAttachment = false;
+    MissingSupport missingSupport = MissingSupport::Floor;
     Anchor ownAnchor = center, parentAnchor = center;
     glm::vec3 attachmentOffset{0};
     bool inheritRotation = true;
@@ -163,75 +149,82 @@ struct Shape
     glm::mat4 geometry{1}, frame{1};
     glm::quat worldRotation{1, 0, 0, 0};
 
-    // angles는 생성 후 선택적으로 설정하는 초기 X/Y/Z 각도(도)입니다.
-    Shape(int id, int part, ShapeKind kind, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : id(id), part(part), kind(kind), topDirection(topDirection), position(position), size(size), color(color)
+    // 마지막 angles는 초기 X/Y/Z 각도(도)입니다. 생성 시 입력하거나 Get(id).angles로 설정합니다.
+    Shape(int id, int part, ShapeKind kind, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : id(id), part(part), kind(kind), position(position), size(size), angles(angles), color(color)
     {
     }
 };
 
 // 아래 클래스는 모두 같은 셰이더/연결/동작 코드를 사용합니다.
 // 예: scene.Add(Cylinder(10, WHEELS, {0,0,0}, {.3f,.2f,.3f}, Color::Random()));
-// Box(ID,파트,위치,크기,색상): 직육면체를 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Box(ID,파트,위치,크기,색상,각도={0,0,0}): 직육면체를 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Box : Shape
 {
-    Box(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : Shape(id, part, ShapeKind::Box, position, size, color, topDirection)
+    Box(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : Shape(id, part, ShapeKind::Box, position, size, color, angles)
     {
     }
 };
 
-// Cone(ID,파트,위치,크기,색상): 원뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Cone(ID,파트,위치,크기,색상,각도={0,0,0}): 원뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cone : Shape
 {
-    Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : Shape(id, part, ShapeKind::Cone, position, size, color, topDirection)
+    Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : Shape(id, part, ShapeKind::Cone, position, size, color, angles)
     {
     }
 };
 
-// Cylinder(ID,파트,위치,크기,색상): 원기둥을 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Cylinder(ID,파트,위치,크기,색상,각도={0,0,0}): 원기둥을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cylinder : Shape
 {
-    Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : Shape(id, part, ShapeKind::Cylinder, position, size, color, topDirection)
+    Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : Shape(id, part, ShapeKind::Cylinder, position, size, color, angles)
     {
     }
 };
 
-// Sphere(ID,파트,위치,크기,색상): 구를 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Sphere(ID,파트,위치,크기,색상,각도={0,0,0}): 구를 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Sphere : Shape
 {
-    Sphere(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : Shape(id, part, ShapeKind::Sphere, position, size, color, topDirection)
+    Sphere(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : Shape(id, part, ShapeKind::Sphere, position, size, color, angles)
     {
     }
 };
 
-// Pyramid(ID,파트,위치,크기,색상): 사각뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Pyramid(ID,파트,위치,크기,색상,각도={0,0,0}): 사각뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Pyramid : Shape
 {
-    Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color, TopDirection topDirection = TopDirection::Y)
-        : Shape(id, part, ShapeKind::Pyramid, position, size, color, topDirection)
+    Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
+        : Shape(id, part, ShapeKind::Pyramid, position, size, color, angles)
     {
     }
 };
 
 // Id(10): 한 도형. Part(WHEELS): 해당 파트 전체. 모든 도형을 만든 뒤 연결/기능을 등록합니다.
+enum class TargetKind { Object, Part, Layer }; // 기능 대상 / 도형 ID, 파트, 층
 struct Target
 {
     int value;
-    bool part;
+    TargetKind kind;
 };
 // Id(번호): 기능을 개별 도형에만 적용할 때 사용합니다.
 inline Target Id(int id)
 {
-    return {id, false};
+    return {id, TargetKind::Object};
 }
 // Part(파트번호): 기능을 파트 전체에 동시에 적용할 때 사용합니다.
 inline Target Part(int part)
 {
-    return {part, true};
+    return {part, TargetKind::Part};
+}
+
+// Layer(층번호): 그 층의 기본 도형만 선택합니다. 부속 도형은 자동으로 포함하지 않습니다.
+inline Target Layer(int layer)
+{
+    return {layer, TargetKind::Layer};
 }
 
 struct Action
@@ -281,6 +274,27 @@ public:
         return it->second;
     }
 
+    // SetLayer(대상,층번호,이동회전참조ID=-1,접촉유지=true).
+    // 비어 있지 않은 바로 아래층 위에 쌓습니다. XZ 평균 정렬은 하지 않습니다.
+    // 참조ID가 존재하면 그 도형의 이동/회전을 따르지만, 없어져도 이 층은 남습니다.
+    // 접촉유지=false이면 초기 높이만 정렬하고 개별 회전/신축 기준점의 움직임을 허용합니다.
+    void SetLayer(Target target, int number, int motionParent = -1, bool keepContact = true)
+    {
+        if (number<=0)
+            throw std::runtime_error("Layer number must be positive");
+        for (int id : Resolve(target))
+        {
+            Shape& s=Get(id);
+            s.layer=number;
+            s.layerMotionParent=motionParent;
+            s.keepLayerContact=keepContact;
+            s.parent=-1;
+            s.supports.clear();
+            s.supportAttachment=false;
+            s.attachmentOffset=glm::vec3(0);
+        }
+    }
+
     // PlaceOnFloor(대상): 루트 도형을 생성 크기/초기 방향에 맞춰 바닥 Y=0에 놓습니다.
     // 모든 루트 도형을 생성한 뒤, 연결과 동작 설정 전에 호출합니다.
     void PlaceOnFloor(Target target)
@@ -289,7 +303,7 @@ public:
         for (int id : Resolve(target))
         {
             Shape& s=Get(id);
-            if (s.parent>=0 || !s.supports.empty())
+            if (s.parent>=0 || s.supportAttachment || s.layer>0)
                 throw std::runtime_error("PlaceOnFloor requires unattached root shapes");
             s.position.y-=Bounds(s.geometry).first.y;
         }
@@ -298,12 +312,17 @@ public:
 
     // Attach(자식, 부모, 자식접점, 부모접점, 여유위치, 회전상속).
     // 자식.position은 접점에서의 추가 위치입니다. 부모 크기는 상속하지 않습니다.
+    // 없는 자식은 무시합니다. 부모가 없거나 숨겨지면 이 부속과 그 자식도 숨깁니다.
     // 포신: Attach(gun, turret, Shape::back, Shape::center).
     void Attach(int child, int parent, Anchor own = Shape::bottom,
                 Anchor parentPoint = Shape::top, glm::vec3 offset = {0,0,0}, bool rotate = true)
     {
-        Get(parent);
+        if (!shapes.count(child))
+            return;
         Shape& s = Get(child);
+        s.supportAttachment = false;
+        s.layer = 0;
+        s.layerMotionParent = -1;
         s.parent = parent;
         s.supports.clear();
         s.ownAnchor = own;
@@ -314,10 +333,18 @@ public:
 
     // AttachOnTop(몸통, Part(WHEELS)): 지지 도형들의 월드 바운딩 박스 중 최고 높이 사용.
     // XZ는 지지 도형 중심의 평균, 몸통은 수평 유지. 서로 다른 높이도 처리합니다.
-    // 각 지지 도형의 회전은 상속하지 않습니다. 일반 부모 회전 상속은 Attach를 사용합니다.
-    void AttachOnTop(int child, Target supports, glm::vec3 offset = {0,0,0})
+    // 지지대가 없으면 기본적으로 바닥에 놓습니다. KeepPosition은 생성 위치를 유지합니다.
+    // 없는 자식 연결은 무시합니다. 지지 도형의 회전은 상속하지 않습니다.
+    void AttachOnTop(int child, Target supports, glm::vec3 offset = {0,0,0},
+                     MissingSupport missing = MissingSupport::Floor)
     {
+        if (!shapes.count(child))
+            return;
         Shape& s = Get(child);
+        s.layer = 0;
+        s.layerMotionParent = -1;
+        s.supportAttachment = true;
+        s.missingSupport = missing;
         s.parent = -1;
         s.supports = Resolve(supports);
         s.ownAnchor = Shape::bottom;
@@ -395,7 +422,6 @@ public:
     void SetOutwardRotation(int action, int reference)
     {
         Action& a = actions.at(action);
-        Get(reference);
         if (a.kind != ActionKind::Rotate || a.mode != Mode::Once ||
             std::abs(a.amount - 180) > 0.001f || glm::length(a.axis-glm::vec3(0,1,0)) > 0.001f)
             throw std::runtime_error("Outward rotation requires Y axis, Once, 180 degrees");
@@ -408,6 +434,12 @@ public:
     {
         for (auto& [id, s] : shapes)
         {
+            if (s.layer>0 && shapes.count(s.layerMotionParent))
+            {
+                const Shape& parent=Get(s.layerMotionParent);
+                if (parent.layer<=0 || parent.layer>=s.layer)
+                    throw std::runtime_error("Layer motion parent must be a lower-layer root");
+            }
             int rotateCount = 0, scaleCount = 0;
             for (const Action& a : actions)
             {
@@ -422,13 +454,15 @@ public:
         }
         for (Action& a : actions)
         {
-            Resolve(a.target);
+            if (Resolve(a.target).empty() || (a.kind == ActionKind::Swap && !shapes.count(a.other)))
+                continue;
             if (a.kind == ActionKind::Swap)
             {
                 Shape& x = Get(a.target.value);
                 Shape& y = Get(a.other);
                 if (x.parent != y.parent || x.ownAnchor != y.ownAnchor || x.parentAnchor != y.parentAnchor ||
-                    !x.supports.empty() || !y.supports.empty() || x.attachmentOffset != y.attachmentOffset)
+                    !x.supports.empty() || !y.supports.empty() || x.attachmentOffset != y.attachmentOffset ||
+                    x.layer != y.layer || x.layerMotionParent != y.layerMotionParent)
                     throw std::runtime_error("Swap requires matching parent and attachment anchors");
                 a.swapDelta = y.position - x.position;
             }
@@ -445,7 +479,12 @@ public:
     {
         for (Action& a : actions)
         {
-            if (a.key != key)
+            auto targets=Resolve(a.target);
+            bool hasVisible=false;
+            for (int id : targets)
+                hasVisible=hasVisible || Get(id).visible;
+            if (a.key != key || !hasVisible ||
+                (a.kind == ActionKind::Swap && (!shapes.count(a.other) || !Get(a.other).visible)))
                 continue;
             if (a.mode != Mode::Once)
             {
@@ -460,7 +499,7 @@ public:
             a.sign = a.direction;
             if (a.kind == ActionKind::Swap)
                 a.sign = a.value < 0.5f ? 1.0f : -1.0f;
-            if (a.outwardReference >= 0)
+            if (a.outwardReference >= 0 && shapes.count(a.outwardReference) && Get(a.outwardReference).visible)
             {
                 const Shape& ref = Get(a.outwardReference);
                 float x = ref.position.x + Movement(ref.id).x;
@@ -563,7 +602,7 @@ public:
         glm::vec3 lo(1e9f), hi(-1e9f);
         for (const auto& [id, s] : shapes)
         {
-            if (!s.floorBound)
+            if (!s.floorBound || !s.visible)
                 continue;
             auto bounds = Bounds(s.geometry);
             lo = glm::min(lo, bounds.first);
@@ -611,15 +650,16 @@ private:
         return glm::normalize(v);
     }
 
-    // Resolve(target): ID 또는 파트에 속한 도형 ID 목록을 구합니다.
+    // Resolve(target): 존재하는 대상만 반환합니다. 빈 파트/없는 ID는 빈 목록입니다.
     std::vector<int> Resolve(Target target)
     {
         std::vector<int> result;
         for (const auto& [id, s] : shapes)
-            if ((!target.part && id==target.value) || (target.part && s.part==target.value))
+            if ((target.kind==TargetKind::Object && id==target.value) ||
+                (target.kind==TargetKind::Part && s.part==target.value) ||
+                (target.kind==TargetKind::Layer && s.layer>0 && s.layer==target.value))
                 result.push_back(id);
-        if (result.empty())
-            throw std::runtime_error("Empty target: " + std::to_string(target.value));
+        // 빈 파트나 생략한 개별 ID는 유효한 빈 선택입니다.
         return result;
     }
 
@@ -635,7 +675,11 @@ private:
     // Matches: 기능의 대상이 현재 도형/파트인지 검사합니다.
     static bool Matches(const Action& a, const Shape& s)
     {
-        return a.target.part ? s.part==a.target.value : s.id==a.target.value;
+        if (a.target.kind==TargetKind::Part)
+            return s.part==a.target.value;
+        if (a.target.kind==TargetKind::Layer)
+            return s.layer>0 && s.layer==a.target.value;
+        return s.id==a.target.value;
     }
 
     // Movement: 개별 이동과 위치 교환을 합산합니다. 부모 좌표계 기준입니다.
@@ -649,7 +693,7 @@ private:
             {
                 glm::vec3 direction=a.axis;
                 if (a.space==TransformSpace::Local)
-                    direction=glm::quat(glm::radians(s.angles))*TopRotation(s.topDirection)*direction;
+                    direction=glm::quat(glm::radians(s.angles))*direction;
                 else if (a.space==TransformSpace::World)
                     direction=glm::inverse(inherited)*direction;
                 result+=direction*a.value;
@@ -674,35 +718,99 @@ private:
             throw std::runtime_error("Attachment cycle at ID " + std::to_string(id));
         state[id]=1;
         Shape& s=Get(id);
+        s.visible=true;
         glm::vec3 origin=position;
         glm::quat inherited(1,0,0,0);
-        glm::quat initial=glm::quat(glm::radians(s.angles))*TopRotation(s.topDirection);
+        glm::quat initial=glm::quat(glm::radians(s.angles));
+        float layerTop=position.y;
+        bool missingSupport=s.supportAttachment && s.supports.empty();
+
         if (s.parent>=0)
         {
+            if (!shapes.count(s.parent))
+            {
+                s.visible=false;
+                state[id]=2;
+                return;
+            }
             EvaluateOne(s.parent,state);
             Shape& parent=Get(s.parent);
+            if (!parent.visible)
+            {
+                s.visible=false;
+                state[id]=2;
+                return;
+            }
             origin=glm::vec3(parent.geometry*glm::vec4(AnchorPoint(s.parentAnchor),1));
             if (s.inheritRotation)
                 inherited=parent.worldRotation;
+        }
+        else if (s.layer>0)
+        {
+            // 번호가 작은 층 중 가장 가까운 층을 선택합니다. 부속 높이는 층 높이에 포함하지 않습니다.
+            int below=0;
+            for (const auto& [otherId,other] : shapes)
+                if (other.layer>0 && other.layer<s.layer)
+                    below=std::max(below,other.layer);
+            if (below>0)
+            {
+                layerTop=-1e9f;
+                for (const auto& [otherId,other] : shapes)
+                {
+                    if (other.layer!=below)
+                        continue;
+                    EvaluateOne(otherId,state);
+                    layerTop=glm::max(layerTop,Bounds(Get(otherId).geometry).second.y);
+                }
+            }
+            origin.y=layerTop;
+            // 층의 XZ는 설정값 그대로입니다. 선택적으로 지정한 참조의 변환만 추가합니다.
+            if (shapes.count(s.layerMotionParent))
+            {
+                EvaluateOne(s.layerMotionParent,state);
+                Shape& parent=Get(s.layerMotionParent);
+                inherited=parent.worldRotation;
+                glm::vec3 center(parent.geometry[3]);
+                glm::vec3 reference(parent.position.x,0,parent.position.z);
+                glm::vec3 shifted=center+inherited*(glm::vec3(s.position.x,0,s.position.z)-reference);
+                origin.x=shifted.x-(inherited*s.position).x;
+                origin.z=shifted.z-(inherited*s.position).z;
+            }
         }
         else if (!s.supports.empty())
         {
             origin=glm::vec3(0);
             float top=-1e9f;
+            int count=0;
             for (int support : s.supports)
             {
                 EvaluateOne(support,state);
                 Shape& parent=Get(support);
+                if (!parent.visible)
+                    continue;
                 origin+=glm::vec3(parent.geometry[3]);
                 top=glm::max(top,Bounds(parent.geometry).second.y);
+                ++count;
             }
-            origin/=(float)s.supports.size();
-            origin.y=top;
+            missingSupport=count==0;
+            if (count>0)
+            {
+                origin/=(float)count;
+                origin.y=top;
+            }
+            else
+                origin=position;
         }
         glm::vec3 ownPoint(0);
-        if (s.parent>=0 || !s.supports.empty())
+        if (s.parent>=0 || (!s.supports.empty() && !missingSupport))
             ownPoint=initial*(AnchorPoint(s.ownAnchor)*s.size);
-        origin+=inherited*(s.position+s.attachmentOffset-ownPoint+Movement(id,inherited));
+        if (s.layer>0)
+            ownPoint.y=Bounds(glm::mat4_cast(inherited*initial)*glm::scale(glm::mat4(1),s.size)).first.y;
+        // 층 배치의 ownPoint는 월드 Y, 일반 연결은 부모 좌표 기준입니다.
+        if (s.layer>0)
+            origin+=inherited*(s.position+Movement(id,inherited))-glm::vec3(0,ownPoint.y,0);
+        else
+            origin+=inherited*(s.position+s.attachmentOffset-ownPoint+Movement(id,inherited));
 
         glm::vec3 scale(1), scalePivot(0), rotationAxis(0,1,0);
         Anchor rotationAnchor=Shape::center;
@@ -736,6 +844,16 @@ private:
             *glm::translate(glm::mat4(1),-rotationPivot)*glm::mat4_cast(initial)
             *glm::translate(glm::mat4(1),scaleShift);
         s.geometry=glm::scale(s.frame,s.size*scale);
+        if ((missingSupport && s.missingSupport==MissingSupport::Floor) || (s.layer>0 && s.keepLayerContact))
+        {
+            // 기울어진 도형도 실제 변환된 바운딩 박스의 아래쪽을 바닥에 맞춥니다.
+            float floorY=(s.layer>0 ? layerTop : position.y)+s.position.y+s.attachmentOffset.y+
+                (inherited*Movement(id,inherited)).y;
+            float lift=floorY-Bounds(s.geometry).first.y;
+            glm::mat4 correction=glm::translate(glm::mat4(1),glm::vec3(0,lift,0));
+            s.frame=correction*s.frame;
+            s.geometry=correction*s.geometry;
+        }
         state[id]=2;
     }
 };
@@ -886,19 +1004,26 @@ void BuildTank()
     scene.Add(Box(POLE_RIGHT,POLES,{0,0,0},
         {0.035f,0.42f,0.035f},Color::Random(POLES)));
 
-    scene.PlaceOnFloor(Part(WHEELS));
+    // 층은 높이 순서만 지정합니다. 중간 층의 도형을 지우면 그 층은 자동으로 건너뜁니다.
+    scene.SetLayer(Part(WHEELS),1);
+    scene.SetLayer(Id(BODY_MAIN),2);
+    // BODY_MAIN이 있으면 그 이동/회전을 상속하고, 없어도 3층은 아래층 위에 남습니다.
+    scene.SetLayer(Part(TURRETS),3,BODY_MAIN);
 
-    // 6-2. 접점 연결: 부모 신축은 높이만, 부모 이동/회전은 전체 자식에 전달됩니다.
-    scene.AttachOnTop(BODY_MAIN,Part(WHEELS));
-    scene.Attach(TURRET_LEFT,BODY_MAIN,Shape::bottom,Shape::top);
-    scene.Attach(TURRET_RIGHT,BODY_MAIN,Shape::bottom,Shape::top);
+    // 6-2. 부속 연결: 각 층의 개별 도형에 붙입니다. 부속에도 생성 각도와 독립 기능을 설정할 수 있습니다.
+    // 부속은 지정 부모 도형에만 연결됩니다. 부모가 없어지면 함께 숨깁니다.
     scene.Attach(GUN_LEFT,TURRET_LEFT,Shape::back,Shape::center);
     scene.Attach(GUN_RIGHT,TURRET_RIGHT,Shape::back,Shape::center);
     scene.Attach(POLE_LEFT,TURRET_LEFT,Shape::bottom,Shape::center);
     scene.Attach(POLE_RIGHT,TURRET_RIGHT,Shape::bottom,Shape::center);
 
-    // 6-3. 파트 전체 신축: 바퀴 두 개는 한 기능의 동일한 배율을 공유합니다.
-    scene.AddScale(Part(WHEELS),GLFW_KEY_D,{0,1,0},Shape::bottom,
+    // 임의 각도 부속 추가 예 (사용하려면 두 줄 모두 주석 해제):
+    // scene.Add(Cylinder(60,BARRELS,{0,0,0},{.1f,.5f,.1f},Color::Random(),{25,40,15}));
+    // scene.Attach(60,WHEEL_LEFT,Shape::bottom,Shape::center);
+    // BODY_MAIN 등 어떤 도형을 부모로 지정해도 같은 방식으로 동작합니다.
+
+    // 6-3. 신축 대상은 Layer(1), Part(WHEELS), Id(WHEEL_LEFT) 중 원하는 것으로 바꿉니다.
+    scene.AddScale(Layer(1),GLFW_KEY_D,{0,1,0},Shape::bottom,
         LOWER_SCALE_MIN,LOWER_SCALE_MAX,LOWER_SCALE_SPEED,Mode::PingPong);
 
     // 6-4. 개별 회전: 부모 회전에 더해서 자기 기준점으로 독립 회전합니다.
@@ -1094,6 +1219,8 @@ void DrawScene()
     glDrawArrays(GL_TRIANGLES,meshRanges.at(ShapeKind::Box).first,meshRanges.at(ShapeKind::Box).count);
     for (const auto& [id,shape] : scene.shapes)
     {
+        if (!shape.visible)
+            continue;
         glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(shape.geometry));
         glUniform3fv(colorLocation,1,glm::value_ptr(shape.color.value));
         MeshRange range=meshRanges.at(shape.kind);

@@ -33,6 +33,14 @@ glm::vec3 Point(int id,Anchor anchor)
 void CheckScene()
 {
     BuildTank();
+    // 기존 두 바퀴 회귀 검증용 구성. 사용자의 실제 BuildTank는 변경하지 않습니다.
+    if (!scene.shapes.count(WHEEL_LEFT))
+        scene.Add(Box(WHEEL_LEFT,WHEELS,{-.26f,.12f,0},{.26f,.24f,.9f},Color::Random(WHEELS)));
+    if (!scene.shapes.count(WHEEL_RIGHT))
+        scene.Add(Box(WHEEL_RIGHT,WHEELS,{.26f,.12f,0},{.26f,.24f,.9f},Color::Random(WHEELS)));
+    scene.SetLayer(Part(WHEELS),1);
+    scene.SetLayer(Id(BODY_MAIN),2);
+    scene.Seal();
     scene.Trigger(GLFW_KEY_D);
     scene.Update(.5f);
     Check(Near(TankScene::Bounds(scene.Get(WHEEL_LEFT).geometry).first.y,0),"wheel bottom drift");
@@ -131,8 +139,8 @@ void CheckCustom()
 // CheckDirections: 여섯 윗방향, 바닥 배치, 지지대 개수, 좌표계별 회전을 검사합니다.
 void CheckDirections()
 {
-    TopDirection directions[]={TopDirection::X,TopDirection::Y,TopDirection::Z,
-        TopDirection::MinusX,TopDirection::MinusY,TopDirection::MinusZ};
+    glm::vec3 directions[]={{0,0,-90},{0,0,0},{90,0,0},
+        {0,0,90},{180,0,0},{-90,0,0}};
     glm::vec3 expected[]={{1,0,0},{0,1,0},{0,0,1},{-1,0,0},{0,-1,0},{0,0,-1}};
     for (int i=0;i<6;++i)
     {
@@ -154,7 +162,7 @@ void CheckDirections()
     {
         TankScene t;
         for (int i=0;i<count;++i)
-            t.Add(Cylinder(i,0,{(i-(count-1)*.5f)*.6f,0,0},{.3f,.2f,.3f},Color::Random(0),TopDirection::X));
+            t.Add(Cylinder(i,0,{(i-(count-1)*.5f)*.6f,0,0},{.3f,.2f,.3f},Color::Random(0),glm::vec3(0,0,-90)));
         t.PlaceOnFloor(Part(0));
         t.Add(Pyramid(10,1,{0,0,0},{1,.4f,.4f},Color::Random()));
         t.AttachOnTop(10,Part(0));
@@ -169,7 +177,7 @@ void CheckDirections()
         TankScene t;
         t.Add(Box(1,0,{0,0,0},{1,1,1},Color::Random()));
         t.Get(1).angles={0,0,90};
-        t.Add(Cylinder(2,1,{0,0,0},{.2f,1,.2f},Color::Random(),TopDirection::Z));
+        t.Add(Cylinder(2,1,{0,0,0},{.2f,1,.2f},Color::Random(),glm::vec3(90,0,0)));
         t.Attach(2,1,Shape::center,Shape::center);
         t.AddRotation(Id(2),'r',{0,1,0},Shape::center,1,90,90,Mode::Once,space);
         t.Seal();
@@ -189,6 +197,130 @@ void CheckDirections()
         glm::vec3 displacement=glm::vec3(t.Get(2).geometry[3])-before;
         Check(glm::length(displacement-worldAxis)<.0001f,"movement coordinate space failed");
     }
+}
+
+// CheckMissingParts: 아무 파트나 생략할 수 있고 없는 대상의 기능이 안전하게 무시되는지 검사합니다.
+void CheckMissingParts()
+{
+    for (int count : {0,1,3})
+    {
+        TankScene t;
+        for (int i=0;i<count;++i)
+            t.Add(Box(i,0,{float(i)*.3f,0,0},{.2f,.3f,.2f},Color::Random()));
+        t.PlaceOnFloor(Part(0));
+        t.Add(Box(10,1,{0,0,0},{.8f,.2f,.5f},Color::Random()));
+        t.AttachOnTop(10,Part(0));
+        t.Add(Cone(20,2,{0,0,0},{.2f,.3f,.2f},Color::Random()));
+        t.Attach(20,10);
+        t.AddScale(Part(0),'d',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
+        t.AddRotation(Id(99),'g',{0,1,0},Shape::back,1,90,180);
+        t.AddSwap(20,99,'l',1);
+        t.Attach(99,10);
+        t.Seal();
+        t.Trigger('d');
+        t.Trigger('g');
+        t.Trigger('l');
+        t.Update(.5f);
+        float wanted=count==0 ? 0.0f : TankScene::Bounds(t.Get(0).geometry).second.y;
+        Check(Near(TankScene::Bounds(t.Get(10).geometry).first.y,wanted),"missing support fallback failed");
+        Check(Near(TankScene::Bounds(t.Get(20).geometry).first.y,TankScene::Bounds(t.Get(10).geometry).second.y),"fallback child contact failed");
+        Check(!t.actions[1].active && !t.actions[2].active,"missing target action was activated");
+        t.Reset();
+    }
+    TankScene t;
+    t.Add(Cylinder(1,1,{.3f,0,.2f},{.2f,.8f,.2f},Color::Random(),glm::vec3(0,0,-90)));
+    t.Attach(1,99);
+    t.Add(Sphere(2,2,{0,0,0},{.1f,.1f,.1f},Color::Random()));
+    t.Attach(2,1);
+    t.Seal();
+    Check(!t.Get(1).visible && !t.Get(2).visible,"missing parent descendants must hide");
+    TankScene empty;
+    empty.PlaceOnFloor(Part(0));
+    empty.AttachOnTop(10,Part(0));
+    empty.AddMovement(Part(0),'m',{1,0,0},1,1);
+    empty.Seal();
+    empty.Trigger('m');
+    empty.Update(1);
+    empty.KeepOnFloor(4,4);
+    empty.Reset();
+}
+
+// CheckLayers: 비어 있는 중간 층, XZ 유지, 부속 독립 동작, 부모 삭제 전파를 검사합니다.
+void CheckLayers()
+{
+    for (int mask=0;mask<8;++mask)
+    {
+        TankScene t;
+        if (mask&1)
+            t.Add(Box(10,0,{-.6f,0,.2f},{.4f,.3f,.6f},Color::Random()));
+        if (mask&2)
+            t.Add(Pyramid(20,1,{.1f,0,-.2f},{.8f,.5f,.6f},Color::Random()));
+        if (mask&4)
+            t.Add(Sphere(30,2,{.7f,0,.3f},{.3f,.4f,.3f},Color::Random()));
+        t.SetLayer(Id(10),1);
+        t.SetLayer(Id(20),2);
+        t.SetLayer(Id(30),3,20);
+        // 각 기본 도형에 임의 각도의 부속과 손자 부속을 연결합니다.
+        for (int base : {10,20,30})
+        {
+            t.Add(Cylinder(base+1,3,{0,0,0},{.1f,.8f,.1f},Color::Random(),{25,40,15}));
+            t.Attach(base+1,base,Shape::bottom,Shape::center);
+            t.Add(Cone(base+2,4,{0,0,0},{.1f,.2f,.1f},Color::Random(),{-35,20,60}));
+            t.Attach(base+2,base+1,Shape::bottom,Shape::top);
+            t.AddRotation(Id(base+1),'r',{0,1,0},Shape::bottom,1,80,180);
+            t.AddScale(Id(base+2),'s',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
+            t.AddMovement(Id(base+2),'m',{1,0,0},.1f,.1f);
+        }
+        t.AddScale(Layer(1),'d',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
+        t.Seal();
+        float top=0;
+        for (int base : {10,20,30})
+        {
+            bool present=t.shapes.count(base)!=0;
+            Check(t.Get(base+1).visible==present && t.Get(base+2).visible==present,"layer accessory visibility mismatch");
+            if (!present)
+                continue;
+            auto bounds=TankScene::Bounds(t.Get(base).geometry);
+            Check(Near(bounds.first.y,top),"empty layer was not skipped");
+            Check(Near(t.Get(base).geometry[3].x,t.Get(base).position.x),"layer X was recentered");
+            Check(Near(t.Get(base).geometry[3].z,t.Get(base).position.z),"layer Z was recentered");
+            top=bounds.second.y;
+            glm::vec3 pin=t.Get(base).geometry*glm::vec4(0,0,0,1);
+            glm::vec3 foot=t.Get(base+1).geometry*glm::vec4(0,-.5f,0,1);
+            Check(glm::length(pin-foot)<.0001f,"arbitrary angle attachment failed");
+        }
+        t.Trigger('d');
+        t.Trigger('r');
+        t.Trigger('s');
+        t.Trigger('m');
+        t.Update(.5f);
+        top=0;
+        for (int base : {10,20,30})
+        {
+            if (!t.shapes.count(base))
+                continue;
+            auto bounds=TankScene::Bounds(t.Get(base).geometry);
+            Check(Near(bounds.first.y,top),"dynamic layer stack failed");
+            top=bounds.second.y;
+            glm::vec3 pin=t.Get(base).geometry*glm::vec4(0,0,0,1);
+            glm::vec3 foot=t.Get(base+1).geometry*glm::vec4(0,-.5f,0,1);
+            Check(glm::length(pin-foot)<.0001f,"accessory rotation detached from layer");
+        }
+        t.KeepOnFloor(10,10);
+        t.Reset();
+    }
+    TankScene t;
+    t.Add(Box(1,0,{-.7f,0,0},{.2f,.3f,.3f},Color::Random()));
+    t.Add(Box(2,0,{.7f,0,0},{.2f,.5f,.3f},Color::Random()));
+    t.Add(Box(3,1,{.4f,0,0},{.3f,.2f,.3f},Color::Random()));
+    t.SetLayer(Part(0),1);
+    t.SetLayer(Id(3),3);
+    t.AddScale(Layer(1),'d',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
+    t.Seal();
+    t.Trigger('d');
+    t.Update(.5f);
+    Check(Near(TankScene::Bounds(t.Get(3).geometry).first.y,.625f),"highest of multiple layer members failed");
+    Check(Near(t.Get(3).geometry[3].x,.4f),"uneven layer members changed X");
 }
 
 // VerifyFrame: 숨겨진 OpenGL 창에서 다섯 종류와 조합 애니메이션을 실제 렌더링합니다.
@@ -235,6 +367,8 @@ int main()
         CheckScene();
         CheckCustom();
         CheckDirections();
+        CheckMissingParts();
+        CheckLayers();
         scene=TankScene();
         return TankApplicationMain();
     }
