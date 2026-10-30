@@ -323,6 +323,32 @@ void CheckLayers()
     Check(Near(t.Get(3).geometry[3].x,.4f),"uneven layer members changed X");
 }
 
+// CheckSwing: 부호 있는 왕복 회전이 앞뒤 범위를 지키고 정지/초기화되는지 확인합니다.
+void CheckSwing()
+{
+    TankScene t;
+    t.Add(Cone(1,1,{0,0,0},{.1f,.5f,.1f},Color::Random()));
+    int action=t.AddSwingRotation(Id(1),'p',{1,0,0},Shape::bottom,-30,30,45);
+    t.Seal();
+    glm::vec3 base=t.Get(1).geometry*glm::vec4(0,-.5f,0,1);
+    t.Trigger('p');
+    t.Update(1);
+    Check(Near(t.actions[action].value,15),"positive swing angle failed");
+    t.Update(2);
+    Check(Near(t.actions[action].value,15),"swing period failed");
+    t.Update(1);
+    Check(Near(t.actions[action].value,0),"swing full period failed");
+    t.Update(2.0f/3.0f);
+    Check(Near(t.actions[action].value,-30),"negative swing angle failed");
+    glm::vec3 current=t.Get(1).geometry*glm::vec4(0,-.5f,0,1);
+    Check(glm::length(current-base)<.0001f,"swing pivot moved");
+    t.Trigger('p');
+    t.Update(1);
+    Check(Near(t.actions[action].value,-30),"swing pause failed");
+    t.Reset();
+    Check(Near(t.actions[action].value,0) && !t.actions[action].active,"swing reset failed");
+}
+
 // VerifyFrame: 숨겨진 OpenGL 창에서 다섯 종류와 조합 애니메이션을 실제 렌더링합니다.
 int VerifyFrame(GLFWwindow* window)
 {
@@ -369,6 +395,7 @@ int main()
         CheckDirections();
         CheckMissingParts();
         CheckLayers();
+        CheckSwing();
         scene=TankScene();
         return TankApplicationMain();
     }

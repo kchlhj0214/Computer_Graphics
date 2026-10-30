@@ -240,6 +240,7 @@ struct Action
     float value = 0, progress = 0, start = 0, sign = 1;
     float direction = 1;
     bool active = false;
+    bool angleRange = false; // true이면 low~high 사이의 부호 있는 각도로 왕복
     int other = -1, outwardReference = -1;
     glm::vec3 swapDelta{0};
 };
@@ -384,6 +385,23 @@ public:
         return AddAction(a);
     }
 
+    // AddSwingRotation(대상,키,축,기준점,최소각도,최대각도,초당각도,좌표계).
+    // 0도에서 시작해 최대각도와 최소각도 사이를 왕복합니다. 다시 누르면 정지/재개합니다.
+    // 예: (-30,30,45)는 수직에서 시작해 앞뒤 30도, 초당 45도로 움직입니다.
+    int AddSwingRotation(Target target, int key, glm::vec3 axis, Anchor pivot,
+                         float low, float high, float speed,
+                         TransformSpace space = TransformSpace::Local)
+    {
+        if (low>0 || high<0 || low>=high)
+            throw std::runtime_error("Swing range must include zero and min < max");
+        int index=AddRotation(target,key,axis,pivot,1,speed,high-low,Mode::PingPong,space);
+        Action& a=actions[index];
+        a.angleRange=true;
+        a.low=low;
+        a.high=high;
+        return index;
+    }
+
     // AddScale(대상,키,축마스크,고정점,최소배율,최대배율,초당배율,반복방식).
     // {0,1,0}은 Y만 신축, {1,1,1}은 전체 신축. bottom이면 바닥은 고정됩니다.
     // Once: 현재->최대, Loop: 최소~최대 반복(경계에서 되돌림), PingPong: 연속 왕복.
@@ -515,7 +533,7 @@ public:
         {
             if (!a.active)
                 continue;
-            if (a.kind == ActionKind::Scale)
+            if (a.kind == ActionKind::Scale || a.angleRange)
             {
                 if (a.mode == Mode::Once)
                 {
@@ -1049,6 +1067,83 @@ void BuildTank()
     // scene.AddMovement(Part(TURRETS),GLFW_KEY_U,{1,0,0},.2f,.1f,Mode::PingPong);
     scene.Seal();
 }
+
+// ============================================================================
+// 1번 교체 예시 (전체 주석): 아래 함수의 주석을 풀고 기존 BuildTank 대신 사용합니다.
+// 방법: main의 BuildTank(); 한 줄만 BuildTankExample1(); 로 바꿉니다.
+// 두 함수를 함께 호출하지 않습니다. 크기와 키는 이 예시 안에서 바로 수정합니다.
+// d: 1층 신축, u: 1층 이동, f: 2층 신축, t: 2층 회전,
+// g: 조종석 각각 회전, p: 원뿔 앞뒤 왕복. c: 전체 초기화.
+// ============================================================================
+/* EXAMPLE_1_BEGIN
+void BuildTankExample1()
+{
+    scene.colorMin=COLOR_MIN;
+    scene.colorMax=COLOR_MAX;
+
+    // 1. 이 예제 안에서만 사용하는 ID와 파트 이름입니다.
+    enum ExamplePart { BASE_PART=100, DISC_PART, CAB_PART, CONE_PART };
+    enum ExampleId { BASE=1000, DISC=2000, CAB_LEFT=3000, CAB_RIGHT=3001,
+        CONE_LEFT=3010, CONE_RIGHT=3011 };
+
+    // 2. 1층: Z방향으로 긴 직육면체 바퀴 하나 (폭 .55 / 높이 .22 / 깊이 1.10).
+    scene.Add(Box(BASE,BASE_PART,{0,0,0},{.55f,.22f,1.10f},
+        Color::Fixed(.25f,.25f,.30f)));
+
+    // 3. 2층: 윗방향이 +Y인 납작한 원기둥 (지름 1.0 / 높이 .14).
+    scene.Add(Cylinder(DISC,DISC_PART,{0,0,0},{1.0f,.14f,1.0f},
+        Color::Fixed(.20f,.65f,.85f),{0,0,0}));
+
+    // 4. 3층: 한 변 .28인 정육면체 조종석 두 개.
+    scene.Add(Box(CAB_LEFT,CAB_PART,{-.23f,0,0},{.28f,.28f,.28f},
+        Color::Fixed(.85f,.35f,.20f)));
+    scene.Add(Box(CAB_RIGHT,CAB_PART,{.23f,0,0},{.28f,.28f,.28f},
+        Color::Fixed(.85f,.35f,.20f)));
+
+    // 5. 각 조종석의 부속: 윗방향 +Y, 밑면 지름 .10 / 높이 .50의 가는 원뿔.
+    scene.Add(Cone(CONE_LEFT,CONE_PART,{0,0,0},{.10f,.50f,.10f},
+        Color::Fixed(.85f,.75f,.15f),{0,0,0}));
+    scene.Add(Cone(CONE_RIGHT,CONE_PART,{0,0,0},{.10f,.50f,.10f},
+        Color::Fixed(.85f,.75f,.15f),{0,0,0}));
+
+    // 6. 층 번호는 높이 순서, 세 번째 인자는 이동/회전을 따라갈 도형입니다.
+    // 아래에서 위로만 상속: BASE -> DISC -> 조종석 -> 각 원뿔.
+    scene.SetLayer(Id(BASE),1);
+    scene.SetLayer(Id(DISC),2,BASE);
+    scene.SetLayer(Part(CAB_PART),3,DISC);
+
+    // 7. 원뿔의 밑면 중심을 조종석 윗면 중심에 붙입니다.
+    // 원뿔은 층 높이에 포함하지 않으며 자기 조종석이 없으면 함께 숨습니다.
+    scene.Attach(CONE_LEFT,CAB_LEFT,Shape::bottom,Shape::top);
+    scene.Attach(CONE_RIGHT,CAB_RIGHT,Shape::bottom,Shape::top);
+
+    // 8. 1층: 밑면을 고정한 Y신축 + X방향 .25거리 왕복 이동.
+    // 1층의 이동은 위 전체에 전달되고 신축은 위층 높이에 반영됩니다.
+    scene.AddScale(Layer(1),GLFW_KEY_D,{0,1,0},Shape::bottom,
+        .60f,1.50f,.40f,Mode::PingPong);
+    scene.AddMovement(Id(BASE),GLFW_KEY_U,{1,0,0},.25f,.15f,
+        Mode::PingPong,TransformSpace::World);
+
+    // 9. 2층: 밑면 고정 Y신축. 원기둥 중심의 Y축으로 180도씩 회전.
+    // 1층은 영향을 받지 않고, 두 조종석과 원뿔이 함께 따라갑니다.
+    scene.AddScale(Layer(2),GLFW_KEY_F,{0,1,0},Shape::bottom,
+        .60f,1.80f,.40f,Mode::PingPong);
+    scene.AddRotation(Id(DISC),GLFW_KEY_T,{0,1,0},Shape::center,
+        1,60,180,Mode::Once);
+
+    // 10. 3층: 각각의 조종석 중심에서 같은 방향으로 180도씩 회전.
+    // 아래 1/2층은 그대로이며 각 원뿔만 자기 조종석을 따라갑니다.
+    scene.AddRotation(Part(CAB_PART),GLFW_KEY_G,{0,1,0},Shape::center,
+        1,90,180,Mode::Once);
+
+    // 11. 원뿔: 밑면 중심 고정. 로컬 X축으로 -30~+30도 앞뒤 왕복.
+    // 0도(+Y)를 향한 상태에서 시작합니다. 로컬 앞뒤는 조종석 회전도 따라갑니다.
+    scene.AddSwingRotation(Part(CONE_PART),GLFW_KEY_P,{1,0,0},Shape::bottom,
+        -30,30,45,TransformSpace::Local);
+
+    scene.Seal();
+}
+EXAMPLE_1_END */
 
 // ============================================================================
 // 7. 함수 선언
