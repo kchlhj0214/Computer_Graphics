@@ -10,9 +10,6 @@
 #include <random>
 using namespace std;
 
-// ===========================================================================
-// 1. 설정값 - 창과 카메라
-// ===========================================================================
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
 #define CAMERA_X 2.8f
@@ -32,18 +29,12 @@ using namespace std;
 #define ZOOM_STEP 0.05f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
-// ===========================================================================
-// 바닥 설정
-// ===========================================================================
 #define FLOOR_WIDTH 4.0f
 #define FLOOR_DEPTH 4.0f
 #define FLOOR_HEIGHT 0.04f
 #define FLOOR_RED 0.82f
 #define FLOOR_GREEN 0.88f
 #define FLOOR_BLUE 0.94f
-// ===========================================================================
-// 탱크 부품 크기
-// ===========================================================================
 #define LOWER_WIDTH 0.26f
 #define LOWER_HEIGHT 0.24f
 #define LOWER_DEPTH 0.90f
@@ -61,9 +52,6 @@ using namespace std;
 #define POLE_WIDTH 0.035f
 #define POLE_HEIGHT 0.42f
 #define POLE_DEPTH 0.035f
-// ===========================================================================
-// 애니메이션과 색상 설정
-// ===========================================================================
 #define TANK_MOVE_SPEED 0.65f
 #define LOWER_SCALE_MIN 0.50f
 #define LOWER_SCALE_MAX 1.50f
@@ -78,9 +66,6 @@ using namespace std;
 #define COLOR_MIN 0.10f
 #define COLOR_MAX 0.90f
 
-// ===========================================================================
-// 2. 현재 상태와 OpenGL 변수
-// ===========================================================================
 glm::vec3 tankPosition(0), cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z);
 glm::vec3 cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
 glm::vec3 colors[5], initialColors[5];
@@ -95,9 +80,6 @@ double previousMouseX = 0, previousMouseY = 0;
 GLuint programID = 0, vao = 0, vbo = 0;
 GLint modelLocation, viewLocation, projectionLocation, colorLocation;
 
-// ===========================================================================
-// 3. 함수 선언
-// ===========================================================================
 string ReadFile(const char* name);
 bool InitShader();
 void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color);
@@ -108,9 +90,6 @@ void MouseCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorCallback(GLFWwindow* window, double x, double y);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
-// ===========================================================================
-// 4. 초기화와 메인 반복문
-// ===========================================================================
 int main()
 {
 	if (!glfwInit())return -1;
@@ -133,7 +112,7 @@ int main()
 	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr); glEnableVertexAttribArray(0); glBindVertexArray(0);
 	for (int i = 0; i < 5; ++i)initialColors[i] = colors[i] = glm::vec3(randomColor(randomEngine), randomColor(randomEngine), randomColor(randomEngine));
-	cout << "Arrows: tank | x/X, z/Z: camera | d: height | t: middle | l: swap | g: barrels | p: poles\n"
+	cout << "Arrows: tank | WASD: camera | b: height | t: middle | l: swap | g: barrels | p: poles\n"
 		<< "y/Y: camera spin | r/R: orbit origin | drag/wheel: camera | o: colors | c: reset | q: quit" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
@@ -146,9 +125,6 @@ int main()
 	glfwDestroyWindow(window); glfwTerminate(); return 0;
 }
 
-// ===========================================================================
-// 5. 이동과 애니메이션 처리
-// ===========================================================================
 void UpdateScene(GLFWwindow* window, float dt)
 {
 	glm::vec3 movement(0), cameraMovement(0);
@@ -157,7 +133,7 @@ void UpdateScene(GLFWwindow* window, float dt)
 	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)movement.z -= 1;
 	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)movement.z += 1;
 	if (glm::length(movement) > 0)tankPosition += glm::normalize(movement) * TANK_MOVE_SPEED * dt;
-	// 회전하는 부품까지 포함한 범위로 바닥 경계를 제한합니다.
+	// Include rotating parts in the footprint so the entire tank stays on the floor.
 	float extent = glm::max(LOWER_WIDTH + LOWER_GAP * .5f, LOWER_DEPTH * .5f);
 	extent = glm::max(extent, glm::length(glm::vec2(MIDDLE_WIDTH, MIDDLE_DEPTH)) * .5f);
 	float upperReach = glm::max(glm::length(glm::vec2(UPPER_WIDTH, UPPER_DEPTH)) * .5f,
@@ -165,12 +141,10 @@ void UpdateScene(GLFWwindow* window, float dt)
 	extent = glm::max(extent, (UPPER_WIDTH + UPPER_GAP) * .5f + upperReach);
 	float limitX = glm::max(0.0f, FLOOR_WIDTH * .5f - extent), limitZ = glm::max(0.0f, FLOOR_DEPTH * .5f - extent);
 	tankPosition.x = glm::clamp(tankPosition.x, -limitX, limitX); tankPosition.z = glm::clamp(tankPosition.z, -limitZ, limitZ);
-	// 소문자: 양의 방향, Shift + 문자: 음의 방향 (월드 좌표 기준)
-	bool shift = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
-		|| glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-	float moveDirection = shift ? -1.0f : 1.0f;
-	if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)cameraMovement.x += moveDirection;
-	if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)cameraMovement.z += moveDirection;
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)cameraMovement.x -= 1;
+	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)cameraMovement.x += 1;
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)cameraMovement.z -= 1;
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)cameraMovement.z += 1;
 	if (glm::length(cameraMovement) > 0) {
 		cameraMovement = glm::normalize(cameraMovement) * CAMERA_MOVE_SPEED * dt;
 		cameraPosition += cameraMovement; cameraTarget += cameraMovement;
@@ -197,9 +171,6 @@ void UpdateScene(GLFWwindow* window, float dt)
 	}
 }
 
-// ===========================================================================
-// 6. 도형 그리기
-// ===========================================================================
 void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color)
 {
 	glm::mat4 transform = glm::scale(model, size);
@@ -230,10 +201,10 @@ void DrawScene()
 	for (int i = 0; i < 2; ++i) {
 		float side = i == 0 ? -1.0f : 1.0f;
 		float x = side * upperSide * (1 - 2 * swapProgress) * (UPPER_WIDTH + UPPER_GAP) * .5f;
-		// 중앙 몸체의 회전과 높이를 상속합니다.
+		// Upper parts inherit the middle body rotation and use heights relative to its center.
 		glm::mat4 upper = glm::translate(middle, glm::vec3(x, (MIDDLE_HEIGHT + UPPER_HEIGHT) * .5f, 0));
 		DrawBox(upper, glm::vec3(UPPER_WIDTH, UPPER_HEIGHT, UPPER_DEPTH), colors[2]);
-		// 상부 몸체 내부를 기준점으로 삼아 회전 중에도 연결을 유지합니다.
+		// Each rod starts at the upper body's center, keeping its root embedded throughout rotation.
 		glm::mat4 barrel = glm::rotate(upper, glm::radians(side * barrelAngle), glm::vec3(0, 1, 0));
 		barrel = glm::translate(barrel, glm::vec3(0, 0, -BARREL_LENGTH * .5f));
 		DrawBox(barrel, glm::vec3(BARREL_WIDTH, BARREL_HEIGHT, BARREL_LENGTH), colors[3]);
@@ -243,17 +214,14 @@ void DrawScene()
 	}
 }
 
-// ===========================================================================
-// 7. 키보드 입력
-// ===========================================================================
 void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 {
 	if (action != GLFW_PRESS)return;
 	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
-	if (key == GLFW_KEY_D)lowerChanging = !lowerChanging;
+	if (key == GLFW_KEY_B)lowerChanging = !lowerChanging;
 	if (key == GLFW_KEY_T && middleRemaining == 0)middleRemaining = MIDDLE_CYCLE_ANGLE;
 	if (key == GLFW_KEY_G && barrelRemaining == 0) {
-		// 현재 위치와 방향을 기준으로 항상 바깥쪽 180도 회전을 선택합니다.
+		// Choose the outward half-turn from the current side and barrel heading.
 		float currentSide = upperSide * (1 - 2 * swapProgress);
 		barrelDirection = currentSide * glm::cos(glm::radians(barrelAngle)) >= 0 ? -1.0f : 1.0f;
 		barrelRemaining = BARREL_CYCLE_ANGLE;
@@ -275,9 +243,6 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	}
 }
 
-// ===========================================================================
-// 8. 마우스 오비트와 확대/축소
-// ===========================================================================
 void MouseCallback(GLFWwindow* window, int button, int action, int)
 {
 	if (button != GLFW_MOUSE_BUTTON_LEFT)return;
@@ -305,9 +270,6 @@ void ScrollCallback(GLFWwindow*, double, double yoffset)
 	cameraPosition = cameraTarget + glm::normalize(offset) * radius;
 }
 
-// ===========================================================================
-// 9. 셰이더 파일 로딩과 프로그램 생성
-// ===========================================================================
 string ReadFile(const char* name)
 {
 	ifstream file(name);
@@ -336,7 +298,6 @@ bool InitShader()
 	colorLocation = glGetUniformLocation(programID, "uColor");
 	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
 }
-
 
 
 
