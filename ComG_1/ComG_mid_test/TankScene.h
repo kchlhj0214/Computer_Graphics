@@ -93,7 +93,7 @@ struct Box : Shape
     }
 };
 
-// Cone(ID,파트,위치,크기,색상): 원뿔를 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Cone(ID,파트,위치,크기,색상): 원뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cone : Shape
 {
     Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
@@ -102,7 +102,7 @@ struct Cone : Shape
     }
 };
 
-// Cylinder(ID,파트,위치,크기,색상): 원기둥를 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Cylinder(ID,파트,위치,크기,색상): 원기둥을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Cylinder : Shape
 {
     Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
@@ -120,7 +120,7 @@ struct Sphere : Shape
     }
 };
 
-// Pyramid(ID,파트,위치,크기,색상): 사각뿔를 생성합니다. 실제 등록은 scene.Add로 합니다.
+// Pyramid(ID,파트,위치,크기,색상): 사각뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Pyramid : Shape
 {
     Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color)
