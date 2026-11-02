@@ -23,7 +23,8 @@ using namespace std;
 #define BOX_Z_MAX 1.0f
 #define BOX_Y_ROTATE_SPEED 60.0f
 #define DRAG_DEGREES 360.0f
-#define MAX_ROLL_SPEED 720.0f
+#define MAX_ROLL_SPEED 90.0f
+#define BOX_ROTATE_ACCELERATION 180.0f // 회전 가속도 제한 (도/초²)
 #define PHYSICS_FPS 480
 #define BALL_MAX_COUNT 5
 #define BALL_RADIUS 0.09f
@@ -43,7 +44,6 @@ using namespace std;
 #define CUBE_FAR_Z -0.72f
 #define CUBE_NEAR_Z 0.72f
 #define CUBE_GRAVITY 3.0f
-#define CUBE_RESTITUTION 0.18f
 #define CUBE_AIR_DRAG 0.10f
 #define DOOR_OPEN_SECONDS 0.16f
 #define DOOR_WAIT_SECONDS 2.8f
@@ -68,6 +68,7 @@ vector<Ball> balls;
 Cube cubes[CUBE_COUNT];
 DoorState doorState=CLOSED;
 float doorTime=0,doorAngle=0,boxZ=0,yaw=0,roll=0,targetRoll=0;
+float yawSpeed=0;
 bool dragging=false;
 double previousMouseX=0,accumulator=0;
 int movementKey=0;
@@ -198,6 +199,7 @@ void ResetScene()
 {
 	balls.clear();doorState=CLOSED;doorTime=doorAngle=0;
 	boxZ=yaw=roll=targetRoll=0;dragging=false;movementKey=0;reverseKey=false;accumulator=0;
+	yawSpeed=0;
 	boxTransform=previousBoxTransform=RoomMatrix();
 	for(int i=0;i<CUBE_COUNT;++i){
 		float t=CUBE_COUNT==1 ? 0.0f : (float)i/(CUBE_COUNT-1);
@@ -258,8 +260,17 @@ void PhysicsStep(float dt)
 	previousBoxTransform=boxTransform;
 	float sign=reverseKey ? -1.0f : 1.0f;
 	if(movementKey==GLFW_KEY_Z)boxZ=glm::clamp(boxZ+sign*BOX_MOVE_SPEED*dt,BOX_Z_MIN,BOX_Z_MAX);
-	if(movementKey==GLFW_KEY_Y)yaw-=sign*BOX_Y_ROTATE_SPEED*dt;
-	roll+=glm::clamp(targetRoll-roll,-MAX_ROLL_SPEED*dt,MAX_ROLL_SPEED*dt);
+	// 키보드 회전도 시작/정지할 때 각속도가 갑자기 바뀌지 않도록 한다.
+	float desiredYawSpeed=movementKey==GLFW_KEY_Y ? -sign*BOX_Y_ROTATE_SPEED : 0.0f;
+	yawSpeed+=glm::clamp(desiredYawSpeed-yawSpeed,-BOX_ROTATE_ACCELERATION*dt,BOX_ROTATE_ACCELERATION*dt);
+	yaw+=yawSpeed*dt;
+	// 가속·감속 없이 목표 각도로 회전하되 최대 회전 속도만 제한한다.
+	if(dragging){
+		roll+=glm::clamp(targetRoll-roll,-MAX_ROLL_SPEED*dt,MAX_ROLL_SPEED*dt);
+	}
+	else {
+		targetRoll=roll;
+	}
 	boxTransform=RoomMatrix();
 	glm::mat4 inverse=glm::inverse(boxTransform);
 	glm::mat3 rotation(boxTransform);
@@ -307,7 +318,8 @@ void PhysicsStep(float dt)
 				glm::vec3 wallSpeed=WallVelocity(local,dt),relative=cube.velocity-wallSpeed;
 				float incoming=glm::dot(relative,normal);
 				if(incoming<0){
-					relative-=(1+CUBE_RESTITUTION)*incoming*normal;
+					// 벽으로 파고드는 상대 속도만 제거하고 반발 속도는 만들지 않는다.
+					relative-=incoming*normal;
 					cube.velocity=wallSpeed+relative;
 				}
 			}
@@ -366,6 +378,8 @@ void MouseCallback(GLFWwindow* window,int button,int action,int)
 {
 	if(button==GLFW_MOUSE_BUTTON_LEFT){
 		dragging=action==GLFW_PRESS;
+		// 버튼을 놓으면 남은 회전을 취소하고, 다음 드래그는 현재 각도에서 시작한다.
+		targetRoll=roll;
 		if(dragging){double y;glfwGetCursorPos(window,&previousMouseX,&y);}
 	}
 	if(button==GLFW_MOUSE_BUTTON_RIGHT && action==GLFW_PRESS && doorState==CLOSED){
@@ -377,6 +391,11 @@ void CursorCallback(GLFWwindow* window,double x,double)
 {
 	if(!dragging)return;
 	int width,height;glfwGetWindowSize(window,&width,&height);
-	if(width>0)targetRoll-=(float)(x-previousMouseX)*DRAG_DEGREES/width;
+	if(width>0){
+		float delta=-(float)(x-previousMouseX)*DRAG_DEGREES/width;
+		// 방향을 바꾸면 이전 방향으로 남아 있던 회전량을 취소한다.
+		if(delta*(targetRoll-roll)<0)targetRoll=roll;
+		targetRoll+=delta;
+	}
 	previousMouseX=x;
 }

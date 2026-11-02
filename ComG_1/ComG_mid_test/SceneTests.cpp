@@ -99,8 +99,8 @@ void CheckScene()
 void CheckCustom()
 {
     TankScene custom;
-    custom.Add(Sphere(100,1,{0,0,0},{1,1,1},Color::Fixed(.5f,.5f,.5f)));
-    custom.Add(Cylinder(30,0,{-.5f,.5f,0},{.5f,1,.5f},Color::Random(0)));
+    custom.Add(Box(100,1,{0,0,0},{1,1,1},Color::Fixed(.5f,.5f,.5f)));
+    custom.Add(Box(30,0,{-.5f,.5f,0},{.5f,1,.5f},Color::Random(0)));
     custom.Add(Box(5,0,{.5f,1,0},{.5f,2,.5f},Color::Random(0)));
     custom.AttachOnTop(100,Part(0));
     custom.AddScale(Id(30),'d',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
@@ -127,9 +127,9 @@ void CheckCustom()
         rejected=true;
     }
     Check(rejected,"cycle not rejected");
-    for (ShapeKind kind : {ShapeKind::Box,ShapeKind::Cone,ShapeKind::Cylinder,ShapeKind::Sphere,ShapeKind::Pyramid})
+    for (ShapeKind kind : {ShapeKind::Box})
     {
-        auto mesh=MakeMesh(kind,32,20);
+        auto mesh=MakeMesh();
         Check(!mesh.empty() && mesh.size()%3==0,"invalid mesh triangles");
         for (auto p : mesh)
             Check(glm::all(glm::lessThanEqual(glm::abs(p),glm::vec3(.5001f))),"mesh bounds failed");
@@ -145,8 +145,8 @@ void CheckDirections()
     for (int i=0;i<6;++i)
     {
         TankScene t;
-        t.Add(Cylinder(1,0,{0,0,0},{.2f,.8f,.2f},Color::Random(),directions[i]));
-        t.Add(Cone(2,1,{1,0,0},{.3f,.6f,.3f},Color::Random(),directions[i]));
+        t.Add(Box(1,0,{0,0,0},{.2f,.8f,.2f},Color::Random(),directions[i]));
+        t.Add(Box(2,1,{1,0,0},{.3f,.6f,.3f},Color::Random(),directions[i]));
         t.PlaceOnFloor(Part(0));
         t.PlaceOnFloor(Part(1));
         t.Seal();
@@ -162,9 +162,9 @@ void CheckDirections()
     {
         TankScene t;
         for (int i=0;i<count;++i)
-            t.Add(Cylinder(i,0,{(i-(count-1)*.5f)*.6f,0,0},{.3f,.2f,.3f},Color::Random(0),glm::vec3(0,0,-90)));
+            t.Add(Box(i,0,{(i-(count-1)*.5f)*.6f,0,0},{.3f,.2f,.3f},Color::Random(0),glm::vec3(0,0,-90)));
         t.PlaceOnFloor(Part(0));
-        t.Add(Pyramid(10,1,{0,0,0},{1,.4f,.4f},Color::Random()));
+        t.Add(Box(10,1,{0,0,0},{1,.4f,.4f},Color::Random()));
         t.AttachOnTop(10,Part(0));
         t.AddScale(Part(0),'d',{1,0,1},Shape::center,.5f,1.5f,.5f);
         t.Seal();
@@ -177,7 +177,7 @@ void CheckDirections()
         TankScene t;
         t.Add(Box(1,0,{0,0,0},{1,1,1},Color::Random()));
         t.Get(1).angles={0,0,90};
-        t.Add(Cylinder(2,1,{0,0,0},{.2f,1,.2f},Color::Random(),glm::vec3(90,0,0)));
+        t.Add(Box(2,1,{0,0,0},{.2f,1,.2f},Color::Random(),glm::vec3(90,0,0)));
         t.Attach(2,1,Shape::center,Shape::center);
         t.AddRotation(Id(2),'r',{0,1,0},Shape::center,1,90,90,Mode::Once,space);
         t.Seal();
@@ -210,7 +210,7 @@ void CheckMissingParts()
         t.PlaceOnFloor(Part(0));
         t.Add(Box(10,1,{0,0,0},{.8f,.2f,.5f},Color::Random()));
         t.AttachOnTop(10,Part(0));
-        t.Add(Cone(20,2,{0,0,0},{.2f,.3f,.2f},Color::Random()));
+        t.Add(Box(20,2,{0,0,0},{.2f,.3f,.2f},Color::Random()));
         t.Attach(20,10);
         t.AddScale(Part(0),'d',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
         t.AddRotation(Id(99),'g',{0,1,0},Shape::back,1,90,180);
@@ -228,9 +228,9 @@ void CheckMissingParts()
         t.Reset();
     }
     TankScene t;
-    t.Add(Cylinder(1,1,{.3f,0,.2f},{.2f,.8f,.2f},Color::Random(),glm::vec3(0,0,-90)));
+    t.Add(Box(1,1,{.3f,0,.2f},{.2f,.8f,.2f},Color::Random(),glm::vec3(0,0,-90)));
     t.Attach(1,99);
-    t.Add(Sphere(2,2,{0,0,0},{.1f,.1f,.1f},Color::Random()));
+    t.Add(Box(2,2,{0,0,0},{.1f,.1f,.1f},Color::Random()));
     t.Attach(2,1);
     t.Seal();
     Check(!t.Get(1).visible && !t.Get(2).visible,"missing parent descendants must hide");
@@ -254,18 +254,18 @@ void CheckLayers()
         if (mask&1)
             t.Add(Box(10,0,{-.6f,0,.2f},{.4f,.3f,.6f},Color::Random()));
         if (mask&2)
-            t.Add(Pyramid(20,1,{.1f,0,-.2f},{.8f,.5f,.6f},Color::Random()));
+            t.Add(Box(20,1,{.1f,0,-.2f},{.8f,.5f,.6f},Color::Random()));
         if (mask&4)
-            t.Add(Sphere(30,2,{.7f,0,.3f},{.3f,.4f,.3f},Color::Random()));
+            t.Add(Box(30,2,{.7f,0,.3f},{.3f,.4f,.3f},Color::Random()));
         t.SetLayer(Id(10),1);
         t.SetLayer(Id(20),2);
         t.SetLayer(Id(30),3,20);
         // 각 기본 도형에 임의 각도의 부속과 손자 부속을 연결합니다.
         for (int base : {10,20,30})
         {
-            t.Add(Cylinder(base+1,3,{0,0,0},{.1f,.8f,.1f},Color::Random(),{25,40,15}));
+            t.Add(Box(base+1,3,{0,0,0},{.1f,.8f,.1f},Color::Random(),{25,40,15}));
             t.Attach(base+1,base,Shape::bottom,Shape::center);
-            t.Add(Cone(base+2,4,{0,0,0},{.1f,.2f,.1f},Color::Random(),{-35,20,60}));
+            t.Add(Box(base+2,4,{0,0,0},{.1f,.2f,.1f},Color::Random(),{-35,20,60}));
             t.Attach(base+2,base+1,Shape::bottom,Shape::top);
             t.AddRotation(Id(base+1),'r',{0,1,0},Shape::bottom,1,80,180);
             t.AddScale(Id(base+2),'s',{0,1,0},Shape::bottom,.5f,1.5f,.5f);
@@ -327,7 +327,7 @@ void CheckLayers()
 void CheckSwing()
 {
     TankScene t;
-    t.Add(Cone(1,1,{0,0,0},{.1f,.5f,.1f},Color::Random()));
+    t.Add(Box(1,1,{0,0,0},{.1f,.5f,.1f},Color::Random()));
     int action=t.AddSwingRotation(Id(1),'p',{1,0,0},Shape::bottom,-30,30,45);
     t.Seal();
     glm::vec3 base=t.Get(1).geometry*glm::vec4(0,-.5f,0,1);
@@ -349,13 +349,13 @@ void CheckSwing()
     Check(Near(t.actions[action].value,0) && !t.actions[action].active,"swing reset failed");
 }
 
-// VerifyFrame: 숨겨진 OpenGL 창에서 다섯 종류와 조합 애니메이션을 실제 렌더링합니다.
+// VerifyFrame: 숨겨진 OpenGL 창에서 육면체와 조합 애니메이션을 실제 렌더링합니다.
 int VerifyFrame(GLFWwindow* window)
 {
     while (glGetError()!=GL_NO_ERROR)
     {
     }
-    for (ShapeKind kind : {ShapeKind::Box,ShapeKind::Cone,ShapeKind::Cylinder,ShapeKind::Sphere,ShapeKind::Pyramid})
+    for (ShapeKind kind : {ShapeKind::Box})
     {
         scene.Get(BODY_MAIN).kind=kind;
         DrawScene();
@@ -383,7 +383,7 @@ int VerifyFrame(GLFWwindow* window)
     file << "P6\n" << WINDOW_WIDTH << " " << WINDOW_HEIGHT << "\n255\n";
     for (int y=WINDOW_HEIGHT-1;y>=0;--y)
         file.write((char*)pixels.data()+y*WINDOW_WIDTH*3,WINDOW_WIDTH*3);
-    cout << "PASS: all shape meshes, attachments, scale isolation, group sync, cycles, swap, reset, rendering" << endl;
+    cout << "PASS: box mesh, attachments, scale isolation, group sync, cycles, swap, reset, rendering" << endl;
     return 1;
 }
 int main()

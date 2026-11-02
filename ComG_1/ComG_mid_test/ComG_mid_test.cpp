@@ -66,14 +66,12 @@ using namespace std;
 #define COLOR_MAX 0.90f
 
 
-#define MESH_SLICES 32
-#define MESH_STACKS 20
 #define LOWER_SCALE_SPEED 0.60f
 
 // ============================================================================
 // 2. 도형과 설정 자료형 (위치는 중심, 크기는 전체 폭/높이/깊이)
 // ============================================================================
-enum class ShapeKind { Box, Cone, Cylinder, Sphere, Pyramid }; // 모양 종류 / 육면체, 원뿔, 원기둥, 구, 사각뿔
+enum class ShapeKind { Box }; // 모양 종류 / 육면체
 enum class Mode { Once, Loop, PingPong }; // 반복 방식 / 한 사이클, 계속 진행, 왕복
 enum class Anchor { Center, Left, Right, Bottom, Top, Front, Back }; // 로컬 기준점 / 중심, 왼쪽, 오른쪽, 아래, 위, 앞(-Z), 뒤(+Z)
 enum class ActionKind { Move, Rotate, Scale, Swap }; // 기능 종류 / 이동, 회전, 신축, 위치 교환
@@ -156,49 +154,13 @@ struct Shape
     }
 };
 
-// 아래 클래스는 모두 같은 셰이더/연결/동작 코드를 사용합니다.
-// 예: scene.Add(Cylinder(10, WHEELS, {0,0,0}, {.3f,.2f,.3f}, Color::Random()));
+// 모든 육면체는 같은 셰이더/연결/동작 코드를 사용합니다.
+// 예: scene.Add(Box(10, WHEELS, {0,0,0}, {.3f,.2f,.3f}, Color::Random()));
 // Box(ID,파트,위치,크기,색상,각도={0,0,0}): 직육면체를 생성합니다. 실제 등록은 scene.Add로 합니다.
 struct Box : Shape
 {
     Box(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
         : Shape(id, part, ShapeKind::Box, position, size, color, angles)
-    {
-    }
-};
-
-// Cone(ID,파트,위치,크기,색상,각도={0,0,0}): 원뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
-struct Cone : Shape
-{
-    Cone(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
-        : Shape(id, part, ShapeKind::Cone, position, size, color, angles)
-    {
-    }
-};
-
-// Cylinder(ID,파트,위치,크기,색상,각도={0,0,0}): 원기둥을 생성합니다. 실제 등록은 scene.Add로 합니다.
-struct Cylinder : Shape
-{
-    Cylinder(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
-        : Shape(id, part, ShapeKind::Cylinder, position, size, color, angles)
-    {
-    }
-};
-
-// Sphere(ID,파트,위치,크기,색상,각도={0,0,0}): 구를 생성합니다. 실제 등록은 scene.Add로 합니다.
-struct Sphere : Shape
-{
-    Sphere(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
-        : Shape(id, part, ShapeKind::Sphere, position, size, color, angles)
-    {
-    }
-};
-
-// Pyramid(ID,파트,위치,크기,색상,각도={0,0,0}): 사각뿔을 생성합니다. 실제 등록은 scene.Add로 합니다.
-struct Pyramid : Shape
-{
-    Pyramid(int id, int part, glm::vec3 position, glm::vec3 size, Color color, glm::vec3 angles = {0,0,0})
-        : Shape(id, part, ShapeKind::Pyramid, position, size, color, angles)
     {
     }
 };
@@ -880,91 +842,19 @@ private:
 // 4. 공통 도형 메시 생성
 // ============================================================================
 
-// MakeMesh(종류,원둘레분할,구위도분할): 중심 원점, 전체 크기 1인 삼각형 정점 목록.
-// 크기·위치·색상·회전은 공통 셰이더 uniform으로 처리하므로 도형별 셰이더는 없습니다.
-inline std::vector<glm::vec3> MakeMesh(ShapeKind kind, int slices, int stacks)
+// MakeMesh(): 중심 원점, 전체 크기 1인 육면체의 삼각형 정점 목록입니다.
+// 크기·위치·색상·회전은 공통 셰이더 uniform으로 처리합니다.
+inline std::vector<glm::vec3> MakeMesh()
 {
-    if (slices<3 || stacks<2)
-        throw std::runtime_error("Mesh needs at least 3 slices and 2 stacks");
-    std::vector<glm::vec3> vertices;
-
-    // triangle(a,b,c): 삼각형 하나를 버퍼에 추가하는 지역 함수입니다.
-    auto triangle=[&](glm::vec3 a, glm::vec3 b, glm::vec3 c)
-    {
-        vertices.push_back(a);
-        vertices.push_back(b);
-        vertices.push_back(c);
+    glm::vec3 points[]={
+        {-.5f,-.5f,-.5f}, {.5f,-.5f,-.5f}, {.5f,.5f,-.5f}, {-.5f,.5f,-.5f},
+        {-.5f,-.5f,.5f}, {.5f,-.5f,.5f}, {.5f,.5f,.5f}, {-.5f,.5f,.5f}
     };
-
-    if (kind==ShapeKind::Box || kind==ShapeKind::Pyramid)
-    {
-        glm::vec3 p[]={
-            {-.5f,-.5f,-.5f}, {.5f,-.5f,-.5f}, {.5f,.5f,-.5f}, {-.5f,.5f,-.5f},
-            {-.5f,-.5f,.5f}, {.5f,-.5f,.5f}, {.5f,.5f,.5f}, {-.5f,.5f,.5f}
-        };
-        if (kind==ShapeKind::Box)
-        {
-            int indices[]={0,2,1,0,3,2,4,5,6,4,6,7,0,4,7,0,7,3,
-                1,2,6,1,6,5,3,7,6,3,6,2,0,1,5,0,5,4};
-            for (int index : indices)
-                vertices.push_back(p[index]);
-        }
-        else
-        {
-            glm::vec3 top(0,.5f,0);
-            triangle(p[0],top,p[1]);
-            triangle(p[1],top,p[5]);
-            triangle(p[5],top,p[4]);
-            triangle(p[4],top,p[0]);
-            triangle(p[0],p[1],p[5]);
-            triangle(p[0],p[5],p[4]);
-        }
-    }
-    else if (kind==ShapeKind::Sphere)
-    {
-        // spherePoint: 위도/경도에서 반지름 0.5인 구의 정점을 계산합니다.
-        auto spherePoint=[](float latitude, float longitude)
-        {
-            return .5f*glm::vec3(glm::cos(latitude)*glm::cos(longitude),
-                glm::sin(latitude),glm::cos(latitude)*glm::sin(longitude));
-        };
-        for (int y=0; y<stacks; ++y)
-        {
-            float v0=-glm::half_pi<float>()+glm::pi<float>()*y/stacks;
-            float v1=-glm::half_pi<float>()+glm::pi<float>()*(y+1)/stacks;
-            for (int x=0; x<slices; ++x)
-            {
-                float u0=glm::two_pi<float>()*x/slices;
-                float u1=glm::two_pi<float>()*(x+1)/slices;
-                glm::vec3 a=spherePoint(v0,u0), b=spherePoint(v0,u1);
-                glm::vec3 c=spherePoint(v1,u0), d=spherePoint(v1,u1);
-                if (y>0)
-                    triangle(a,c,b);
-                if (y<stacks-1)
-                    triangle(b,c,d);
-            }
-        }
-    }
-    else
-    {
-        for (int i=0; i<slices; ++i)
-        {
-            float a=glm::two_pi<float>()*i/slices;
-            float b=glm::two_pi<float>()*(i+1)/slices;
-            glm::vec3 p(.5f*glm::cos(a),-.5f,.5f*glm::sin(a));
-            glm::vec3 q(.5f*glm::cos(b),-.5f,.5f*glm::sin(b));
-            triangle({0,-.5f,0},p,q);
-            if (kind==ShapeKind::Cone)
-                triangle(p,{0,.5f,0},q);
-            else
-            {
-                glm::vec3 r(p.x,.5f,p.z), s(q.x,.5f,q.z);
-                triangle(p,r,q);
-                triangle(q,r,s);
-                triangle({0,.5f,0},s,r);
-            }
-        }
-    }
+    int indices[]={0,2,1,0,3,2,4,5,6,4,6,7,0,4,7,0,7,3,
+        1,2,6,1,6,5,3,7,6,3,6,2,0,1,5,0,5,4};
+    std::vector<glm::vec3> vertices;
+    for (int index : indices)
+        vertices.push_back(points[index]);
     return vertices;
 }
 
@@ -993,7 +883,7 @@ map<ShapeKind,MeshRange> meshRanges;
 // ============================================================================
 
 // BuildTank(): 도형 생성 -> 연결 -> 기능 부여 -> Seal 순서로 설정합니다.
-// 종류만 Box에서 Cylinder/Sphere/Cone/Pyramid로 바꿔도 같은 기능을 사용할 수 있습니다.
+// 모든 부품은 Box로 생성하며 크기와 초기 각도를 자유롭게 설정합니다.
 void BuildTank()
 {
     scene.colorMin=COLOR_MIN;
@@ -1036,7 +926,7 @@ void BuildTank()
     scene.Attach(POLE_RIGHT,TURRET_RIGHT,Shape::bottom,Shape::center);
 
     // 임의 각도 부속 추가 예 (사용하려면 두 줄 모두 주석 해제):
-    // scene.Add(Cylinder(60,BARRELS,{0,0,0},{.1f,.5f,.1f},Color::Random(),{25,40,15}));
+    // scene.Add(Box(60,BARRELS,{0,0,0},{.1f,.5f,.1f},Color::Random(),{25,40,15}));
     // scene.Attach(60,WHEEL_LEFT,Shape::bottom,Shape::center);
     // BODY_MAIN 등 어떤 도형을 부모로 지정해도 같은 방식으로 동작합니다.
 
@@ -1073,7 +963,7 @@ void BuildTank()
 // 방법: main의 BuildTank(); 한 줄만 BuildTankExample1(); 로 바꿉니다.
 // 두 함수를 함께 호출하지 않습니다. 크기와 키는 이 예시 안에서 바로 수정합니다.
 // d: 1층 신축, u: 1층 이동, f: 2층 신축, t: 2층 회전,
-// g: 조종석 각각 회전, p: 원뿔 앞뒤 왕복. c: 전체 초기화.
+// g: 조종석 각각 회전, p: 육면체 기둥 앞뒤 왕복. c: 전체 초기화.
 // ============================================================================
 /* EXAMPLE_1_BEGIN
 void BuildTankExample1()
@@ -1082,16 +972,16 @@ void BuildTankExample1()
     scene.colorMax=COLOR_MAX;
 
     // 1. 이 예제 안에서만 사용하는 ID와 파트 이름입니다.
-    enum ExamplePart { BASE_PART=100, DISC_PART, CAB_PART, CONE_PART };
+    enum ExamplePart { BASE_PART=100, DISC_PART, CAB_PART, POST_PART };
     enum ExampleId { BASE=1000, DISC=2000, CAB_LEFT=3000, CAB_RIGHT=3001,
-        CONE_LEFT=3010, CONE_RIGHT=3011 };
+        POST_LEFT=3010, POST_RIGHT=3011 };
 
     // 2. 1층: Z방향으로 긴 직육면체 바퀴 하나 (폭 .55 / 높이 .22 / 깊이 1.10).
     scene.Add(Box(BASE,BASE_PART,{0,0,0},{.55f,.22f,1.10f},
         Color::Fixed(.25f,.25f,.30f)));
 
-    // 3. 2층: 윗방향이 +Y인 납작한 원기둥 (지름 1.0 / 높이 .14).
-    scene.Add(Cylinder(DISC,DISC_PART,{0,0,0},{1.0f,.14f,1.0f},
+    // 3. 2층: 윗방향이 +Y인 납작한 육면체 (지름 1.0 / 높이 .14).
+    scene.Add(Box(DISC,DISC_PART,{0,0,0},{1.0f,.14f,1.0f},
         Color::Fixed(.20f,.65f,.85f),{0,0,0}));
 
     // 4. 3층: 한 변 .28인 정육면체 조종석 두 개.
@@ -1100,22 +990,22 @@ void BuildTankExample1()
     scene.Add(Box(CAB_RIGHT,CAB_PART,{.23f,0,0},{.28f,.28f,.28f},
         Color::Fixed(.85f,.35f,.20f)));
 
-    // 5. 각 조종석의 부속: 윗방향 +Y, 밑면 지름 .10 / 높이 .50의 가는 원뿔.
-    scene.Add(Cone(CONE_LEFT,CONE_PART,{0,0,0},{.10f,.50f,.10f},
+    // 5. 각 조종석의 부속: 윗방향 +Y, 밑면 지름 .10 / 높이 .50의 가는 육면체 기둥.
+    scene.Add(Box(POST_LEFT,POST_PART,{0,0,0},{.10f,.50f,.10f},
         Color::Fixed(.85f,.75f,.15f),{0,0,0}));
-    scene.Add(Cone(CONE_RIGHT,CONE_PART,{0,0,0},{.10f,.50f,.10f},
+    scene.Add(Box(POST_RIGHT,POST_PART,{0,0,0},{.10f,.50f,.10f},
         Color::Fixed(.85f,.75f,.15f),{0,0,0}));
 
     // 6. 층 번호는 높이 순서, 세 번째 인자는 이동/회전을 따라갈 도형입니다.
-    // 아래에서 위로만 상속: BASE -> DISC -> 조종석 -> 각 원뿔.
+    // 아래에서 위로만 상속: BASE -> DISC -> 조종석 -> 각 육면체 기둥.
     scene.SetLayer(Id(BASE),1);
     scene.SetLayer(Id(DISC),2,BASE);
     scene.SetLayer(Part(CAB_PART),3,DISC);
 
-    // 7. 원뿔의 밑면 중심을 조종석 윗면 중심에 붙입니다.
-    // 원뿔은 층 높이에 포함하지 않으며 자기 조종석이 없으면 함께 숨습니다.
-    scene.Attach(CONE_LEFT,CAB_LEFT,Shape::bottom,Shape::top);
-    scene.Attach(CONE_RIGHT,CAB_RIGHT,Shape::bottom,Shape::top);
+    // 7. 육면체 기둥의 밑면 중심을 조종석 윗면 중심에 붙입니다.
+    // 육면체 기둥은 층 높이에 포함하지 않으며 자기 조종석이 없으면 함께 숨습니다.
+    scene.Attach(POST_LEFT,CAB_LEFT,Shape::bottom,Shape::top);
+    scene.Attach(POST_RIGHT,CAB_RIGHT,Shape::bottom,Shape::top);
 
     // 8. 1층: 밑면을 고정한 Y신축 + X방향 .25거리 왕복 이동.
     // 1층의 이동은 위 전체에 전달되고 신축은 위층 높이에 반영됩니다.
@@ -1124,21 +1014,21 @@ void BuildTankExample1()
     scene.AddMovement(Id(BASE),GLFW_KEY_U,{1,0,0},.25f,.15f,
         Mode::PingPong,TransformSpace::World);
 
-    // 9. 2층: 밑면 고정 Y신축. 원기둥 중심의 Y축으로 180도씩 회전.
-    // 1층은 영향을 받지 않고, 두 조종석과 원뿔이 함께 따라갑니다.
+    // 9. 2층: 밑면 고정 Y신축. 육면체 중심의 Y축으로 180도씩 회전.
+    // 1층은 영향을 받지 않고, 두 조종석과 육면체 기둥이 함께 따라갑니다.
     scene.AddScale(Layer(2),GLFW_KEY_F,{0,1,0},Shape::bottom,
         .60f,1.80f,.40f,Mode::PingPong);
     scene.AddRotation(Id(DISC),GLFW_KEY_T,{0,1,0},Shape::center,
         1,60,180,Mode::Once);
 
     // 10. 3층: 각각의 조종석 중심에서 같은 방향으로 180도씩 회전.
-    // 아래 1/2층은 그대로이며 각 원뿔만 자기 조종석을 따라갑니다.
+    // 아래 1/2층은 그대로이며 각 육면체 기둥만 자기 조종석을 따라갑니다.
     scene.AddRotation(Part(CAB_PART),GLFW_KEY_G,{0,1,0},Shape::center,
         1,90,180,Mode::Once);
 
-    // 11. 원뿔: 밑면 중심 고정. 로컬 X축으로 -30~+30도 앞뒤 왕복.
+    // 11. 육면체 기둥: 밑면 중심 고정. 로컬 X축으로 -30~+30도 앞뒤 왕복.
     // 0도(+Y)를 향한 상태에서 시작합니다. 로컬 앞뒤는 조종석 회전도 따라갑니다.
-    scene.AddSwingRotation(Part(CONE_PART),GLFW_KEY_P,{1,0,0},Shape::bottom,
+    scene.AddSwingRotation(Part(POST_PART),GLFW_KEY_P,{1,0,0},Shape::bottom,
         -30,30,45,TransformSpace::Local);
 
     scene.Seal();
@@ -1196,9 +1086,9 @@ int main()
     {
         BuildTank();
         vector<glm::vec3> vertices;
-        for (ShapeKind kind : {ShapeKind::Box,ShapeKind::Cone,ShapeKind::Cylinder,ShapeKind::Sphere,ShapeKind::Pyramid})
+        for (ShapeKind kind : {ShapeKind::Box})
         {
-            auto mesh=MakeMesh(kind,MESH_SLICES,MESH_STACKS);
+            auto mesh=MakeMesh();
             meshRanges[kind]={(int)vertices.size(),(int)mesh.size()};
             vertices.insert(vertices.end(),mesh.begin(),mesh.end());
         }
