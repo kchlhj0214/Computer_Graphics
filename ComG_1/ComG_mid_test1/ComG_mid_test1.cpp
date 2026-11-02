@@ -28,6 +28,7 @@ using namespace std;
 #define SEAT_WIDTH .80f
 #define SEAT_DEPTH .38f
 #define SEAT_THICKNESS .055f
+#define PERSON_ENABLED 1 // 0: 사람 숨김, 1: 사람 표시
 #define BODY_WIDTH .30f
 #define BODY_HEIGHT .44f
 #define BODY_DEPTH .18f
@@ -245,27 +246,30 @@ void DrawScene(int width,int height)
     DrawBox(glm::translate(seat,{0,-SEAT_THICKNESS*.5f,0}),
         {SEAT_WIDTH,SEAT_THICKNESS,SEAT_DEPTH},{.80f,.55f,.20f});
 
-    // seat 원점이 의자 윗면입니다. 몸통의 하부를 이 위치에 고정합니다.
-    glm::mat4 person=seat;
-    DrawBox(glm::translate(person,{0,BODY_HEIGHT*.5f,0}),
-        {BODY_WIDTH,BODY_HEIGHT,BODY_DEPTH},{.10f,.65f,.72f});
-    DrawBox(glm::translate(person,{0,BODY_HEIGHT+HEAD_SIZE*.5f,0}),
-        glm::vec3(HEAD_SIZE),{.78f,.58f,.40f});
-    // 앞은 -Z입니다. 작은 눈 두 개도 얇은 육면체로 만듭니다.
-    for(float side:{-1.0f,1.0f})
+    if(PERSON_ENABLED)
     {
-        DrawBox(glm::translate(person,{side*HEAD_SIZE*.22f,BODY_HEIGHT+HEAD_SIZE*.55f,-HEAD_SIZE*.5f-.005f}),
-            {HEAD_SIZE*.16f,HEAD_SIZE*.13f,.012f},{.15f,.15f,.20f});
-        // 다리는 엉덩이 양쪽에서 앞으로 뻗고, 바깥쪽으로 약간 벌립니다.
-        glm::mat4 leg=glm::translate(person,{side*(LEG_WIDTH+LIMB_GAP)*.5f,LEG_WIDTH*.5f,-BODY_DEPTH*.25f});
-        leg=glm::rotate(leg,glm::radians(-side*LEG_SPREAD_ANGLE),glm::vec3(0,1,0));
-        DrawBox(glm::translate(leg,{0,0,-LEG_LENGTH*.5f}),
-            {LEG_WIDTH,LEG_WIDTH,LEG_LENGTH},{.25f,.25f,.65f});
-        // 팔은 어깨 옆에서 아래로 내려오며 Z축으로 벌립니다.
-        glm::mat4 arm=glm::translate(person,{side*(BODY_WIDTH*.5f+ARM_WIDTH*.5f+LIMB_GAP),BODY_HEIGHT,0});
-        arm=glm::rotate(arm,glm::radians(side*ARM_SPREAD_ANGLE),glm::vec3(0,0,1));
-        DrawBox(glm::translate(arm,{0,-ARM_LENGTH*.5f,0}),
-            {ARM_WIDTH,ARM_LENGTH,ARM_WIDTH},{.78f,.58f,.40f});
+        // seat 원점이 의자 윗면입니다. 몸통의 하부를 이 위치에 고정합니다.
+        glm::mat4 person=seat;
+        DrawBox(glm::translate(person,{0,BODY_HEIGHT*.5f,0}),
+            {BODY_WIDTH,BODY_HEIGHT,BODY_DEPTH},{.10f,.65f,.72f});
+        DrawBox(glm::translate(person,{0,BODY_HEIGHT+HEAD_SIZE*.5f,0}),
+            glm::vec3(HEAD_SIZE),{.78f,.58f,.40f});
+        // 앞은 -Z입니다. 작은 눈 두 개도 얇은 육면체로 만듭니다.
+        for(float side:{-1.0f,1.0f})
+        {
+            DrawBox(glm::translate(person,{side*HEAD_SIZE*.22f,BODY_HEIGHT+HEAD_SIZE*.55f,-HEAD_SIZE*.5f-.005f}),
+                {HEAD_SIZE*.16f,HEAD_SIZE*.13f,.012f},{.15f,.15f,.20f});
+            // 다리는 엉덩이 양쪽에서 앞으로 뻗고, 바깥쪽으로 약간 벌립니다.
+            glm::mat4 leg=glm::translate(person,{side*(LEG_WIDTH+LIMB_GAP)*.5f,LEG_WIDTH*.5f,-BODY_DEPTH*.25f});
+            leg=glm::rotate(leg,glm::radians(-side*LEG_SPREAD_ANGLE),glm::vec3(0,1,0));
+            DrawBox(glm::translate(leg,{0,0,-LEG_LENGTH*.5f}),
+                {LEG_WIDTH,LEG_WIDTH,LEG_LENGTH},{.25f,.25f,.65f});
+            // 팔은 어깨 옆에서 아래로 내려오며 Z축으로 벌립니다.
+            glm::mat4 arm=glm::translate(person,{side*(BODY_WIDTH*.5f+ARM_WIDTH*.5f+LIMB_GAP),BODY_HEIGHT,0});
+            arm=glm::rotate(arm,glm::radians(side*ARM_SPREAD_ANGLE),glm::vec3(0,0,1));
+            DrawBox(glm::translate(arm,{0,-ARM_LENGTH*.5f,0}),
+                {ARM_WIDTH,ARM_LENGTH,ARM_WIDTH},{.78f,.58f,.40f});
+        }
     }
     glBindVertexArray(0);
 }

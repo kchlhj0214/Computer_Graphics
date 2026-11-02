@@ -25,6 +25,7 @@ CPP 상단의 define으로 수정합니다.
 - `SWING_INITIAL_SPEED`, `SWING_MIN_SPEED`, `SWING_MAX_SPEED`: 초기 위상 속도와 범위. 기본 60, 15, 150도/초.
 - `SWING_SPEED_STEP`: 속도 변경량. 기본 15도/초.
 - `KEY_SWING`, `KEY_ANGLE_DOWN/UP`, `KEY_SPEED_DOWN/UP`: 조작키.
+- `PERSON_ENABLED`: 사람 표시 0=숨김, 1=표시. 기본 1. 그네와 애니메이션은 유지됩니다.
 - `ORBIT_ENABLED`: 마우스 오비트 0=끔, 1=켬. 기본 1. 키보드 공전과 휠은 별개입니다.
 - 나머지 크기 define: 지지대, 줄, 좌석, 사람의 각 부품 전체 크기.
 
