@@ -206,15 +206,17 @@ Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float se
 // 3. 배율증감: 최종 배율은 1+값입니다. 현재 크기에 대한 상대 배율이며 최종 크기를 직접 넣는 것이 아닙니다.
 //    +.5f는 1.5배, +1.0f는 2배, -.5f는 절반입니다. 0은 변화가 없으며 -1 이하는 허용하지 않습니다.
 //    Repeat(Scale(...),횟수)는 배율이 누적됩니다. 원래 크기로 돌아오려면 PingPong(Scale(...))을 사용합니다.
-// 4. 기준점(생략 가능): Pivot::Center가 기본값입니다. 신축 시작 시의 중심을 기준으로 양쪽으로 늘어납니다.
-//    회전의 Center와 달리 신축 기준점은 실행 중 현재 중심을 따라가지 않고 시작 위치로 고정됩니다.
+// 4. 기준점(생략 가능): Pivot::Center가 기본값입니다. 매 순간 현재 중심을 기준으로 양쪽으로 늘어납니다.
+//    Move나 Swap, 공전과 함께 실행해도 신축 자체가 중심을 밀거나 당기지 않고 크기만 변경합니다.
 //    Left / Right / Bottom / Top / Front / Back은 시작 시 해당 면 중심을 기준으로 사용합니다.
 //    회전하지 않은 객체에 Axis::Y와 Pivot::Bottom을 지정하면 아래쪽을 고정하고 높이를 변경합니다.
 //    Point(x,y,z)는 조립 공간의 지정 좌표를 기준으로 신축하므로 객체의 중심 위치도 바뀔 수 있습니다.
 // 5. 시간(생략 가능): 편도 실행 시간(초). 생략하거나 0이면 abs(배율증감)/SCALE_SPEED초가 걸립니다.
 //    양수 시간을 지정하면 해당 시간에 신축을 완료합니다. 음수는 허용하지 않습니다.
 //    시간을 지정하려면 기준점도 적어야 합니다. PingPong은 같은 시간 동안 원래 크기로 돌아옵니다.
-// 예: Scale(0,Axis::X,.5f) -> 시작 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
+// 예: Scale(0,Axis::X,.5f) -> 매 순간 현재 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
+// 예: Run(Parallel({Move(0,{1,0,0},2.0f),Scale(0,Axis::X,.5f,Pivot::Center,2.0f)}));
+//     2초 동안 X방향으로 1만큼 이동하며 X방향 크기를 1.5배로 늘립니다. 신축은 이동 거리를 바꾸지 않습니다.
 // 예: Scale(0,Axis::Y,-.5f,Pivot::Bottom,2.0f) -> 아래 면 중심을 기준으로 2초 동안 Y방향 크기를 절반으로 줄입니다.
 // 예: Scale(0,Axis::X,1.0f,Point(0,0,0),1.0f) -> 1초 동안 X방향 크기와 원점에서의 X방향 거리를 두 배로 만듭니다.
 Command Scale(int id,Axis axis,float change,Pivot pivot=Pivot::Center,float seconds=0)
@@ -431,7 +433,7 @@ float Advance(Command& c,float dt)
         {
             c.backward=true;
             child.backward=true;child.done=false;child.elapsed=0;
-            // 이전 진행값을 유지해 반대 방향으로 되돌립니다. Center 회전은 복귀 중에도 현재 중심을 사용합니다.
+            // 이전 진행값을 유지해 반대 방향으로 되돌립니다. Center 회전과 신축은 복귀 중에도 현재 중심을 사용합니다.
             // 다른 축의 회전과 함께 실행하면 최초 자세로 정확히 복귀하는 것은 아닙니다.
             dt=Advance(child,dt);
         }
@@ -457,9 +459,9 @@ float Advance(Command& c,float dt)
             change=glm::translate(change,c.delta*(value-c.previous));
         else
         {
-            // 중심 자전만 이동하는 객체를 따라가며, 신축과 다른 회전 기준점은 기존 방식을 유지합니다.
+            // Center 회전과 신축은 현재 중심을 따라갑니다. Point와 면 기준점은 시작 시 위치를 유지합니다.
             glm::vec3 pivotPosition=c.pivotPosition;
-            if(c.kind==Kind::Rotate && !c.pivot.point
+            if(!c.pivot.point
                 && c.pivot.value.x==0 && c.pivot.value.y==0 && c.pivot.value.z==0)
                 pivotPosition=glm::vec3(box.model*glm::vec4(0,0,0,1));
             change=glm::translate(change,pivotPosition);
