@@ -42,6 +42,9 @@ using namespace std;
 // ===========================================================================
 #define FLOOR_WIDTH 4.0f
 #define FLOOR_DEPTH 4.0f
+#define BULLET_SIZE .035f
+#define BULLET_SPEED 3.0f
+#define BULLET_RANGE (FLOOR_WIDTH * 2.0f) // 바닥 한 변의 2배 거리
 #define FLOOR_HEIGHT 0.04f
 #define FLOOR_RED 0.82f
 #define FLOOR_GREEN 0.88f
@@ -867,6 +870,39 @@ enum ShapeId { WHEEL_LEFT=10, WHEEL_RIGHT=11, BODY_MAIN=20,
     POLE_LEFT=50, POLE_RIGHT=51 };
 
 TankScene scene;
+struct Bullet
+{
+    glm::vec3 muzzle,direction;
+    glm::quat rotation;
+    float distance=BULLET_SIZE*.5f;
+};
+vector<Bullet> bullets;
+
+// FireBullets: BARRELS 파트의 보이는 모든 포신에서 동시에 발사합니다.
+// 포신의 로컬 -Z가 총구 방향입니다. 최종 행렬로 위치/방향을 구해 부모 회전도 반영합니다.
+void FireBullets()
+{
+    // 방향키로 탱크 전체가 이동하는 동안에도 현재 총구 위치에서 발사합니다.
+    scene.Evaluate();
+    // 복사본만 잠깐 진행해 포신에 실제로 전달되는 움직임을 검사합니다.
+    // 부모 이동/회전, 위치 교환, 아래층 신축도 포함하고 관련 없는 부품 동작은 허용합니다.
+    TankScene preview=scene;
+    preview.Update(.01f);
+    for(const auto& [id,shape]:scene.shapes)
+    {
+        if(shape.part!=BARRELS || !shape.visible)continue;
+        const auto& next=preview.shapes.at(id);
+        for(int column=0;column<4;++column)
+            if(glm::length(next.geometry[column]-shape.geometry[column])>1e-6f)return;
+    }
+    for(const auto& [id,shape]:scene.shapes)
+    {
+        if(shape.part!=BARRELS || !shape.visible)continue;
+        glm::vec3 muzzle(shape.geometry*glm::vec4(0,0,-.5f,1));
+        glm::vec3 direction=glm::normalize(glm::vec3(shape.geometry*glm::vec4(0,0,-1,0)));
+        bullets.push_back({muzzle,direction,shape.worldRotation});
+    }
+}
 glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z);
 glm::vec3 cameraTarget(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
 glm::vec3 cameraUp(0,1,0);
@@ -1180,6 +1216,12 @@ void UpdateScene(GLFWwindow* window,float dt)
     }
     scene.Update(dt);
     scene.KeepOnFloor(FLOOR_WIDTH,FLOOR_DEPTH);
+    for(auto& bullet:bullets)
+        bullet.distance+=BULLET_SPEED*dt;
+    bullets.erase(remove_if(bullets.begin(),bullets.end(),[](const Bullet& bullet)
+    {
+        return bullet.distance>=BULLET_RANGE;
+    }),bullets.end());
 }
 
 // ============================================================================
@@ -1211,6 +1253,16 @@ void DrawScene()
         MeshRange range=meshRanges.at(shape.kind);
         glDrawArrays(GL_TRIANGLES,range.first,range.count);
     }
+    for(const auto& bullet:bullets)
+    {
+        glm::mat4 model=glm::translate(glm::mat4(1),bullet.muzzle+bullet.direction*bullet.distance)
+            *glm::mat4_cast(bullet.rotation);
+        model=glm::scale(model,glm::vec3(BULLET_SIZE));
+        glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(model));
+        glUniform3f(colorLocation,.90f,.75f,.15f);
+        MeshRange range=meshRanges.at(ShapeKind::Box);
+        glDrawArrays(GL_TRIANGLES,range.first,range.count);
+    }
     glBindVertexArray(0);
 }
 
@@ -1224,6 +1276,8 @@ void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
     if (action!=GLFW_PRESS)
         return;
     scene.Trigger(key);
+    if(key==GLFW_KEY_SPACE)
+        FireBullets();
     if (key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)
         glfwSetWindowShouldClose(window,true);
     int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
@@ -1236,6 +1290,7 @@ void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
     if (key==GLFW_KEY_C)
     {
         scene.Reset();
+        bullets.clear();
         cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
         cameraTarget={CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z};
         cameraSpin=cameraOrbit=0;
