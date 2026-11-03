@@ -11,6 +11,8 @@
 #include <set>
 #include <cmath>
 #include <stdexcept>
+#include <random>
+#include <map>
 using namespace std;
 
 // ============================================================================
@@ -19,6 +21,8 @@ using namespace std;
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
 #define BOX_COUNT 20
+#define RANDOM_COLOR_MIN .10f
+#define RANDOM_COLOR_MAX .90f
 #define FLOOR_ENABLED 1 // 0: 바닥 숨김, 1: 표시. 방향키 경계는 표시와 무관하게 적용합니다.
 #define FLOOR_WIDTH 4.0f
 #define FLOOR_DEPTH 4.0f
@@ -72,10 +76,29 @@ const Pivot Pivot::Front{false,{0,0,-.5f}};
 const Pivot Pivot::Back{false,{0,0,.5f}};
 // Point(x,y,z): 방향키 전체 이동을 따라가는 조립 공간의 회전/신축 기준점.
 Pivot Point(float x,float y,float z) { return {true,{x,y,z}}; }
+// Color::Random(): 객체별 랜덤 색상. Random(그룹번호): 같은 번호끼리 색상 공유.
+// 고정 색상은 기존 {R,G,B} 또는 Color::Fixed(R,G,B)를 그대로 사용합니다.
+struct Color
+{
+    glm::vec3 value;
+    bool random=false;
+    int group=-1;
+    Color(float r=.5f,float g=.5f,float b=.5f) : value(r,g,b) {}
+    static Color Fixed(float r,float g,float b) { return Color(r,g,b); }
+    static Color Random(int group=-1)
+    {
+        Color color;
+        color.random=true;
+        color.group=group;
+        return color;
+    }
+};
 struct BoxSetting
 {
     bool enabled=false;
-    glm::vec3 size{.3f},center{0},color{.5f},angles{0};
+    glm::vec3 size{.3f},center{0};
+    Color color;
+    glm::vec3 angles{0};
 };
 struct BoxState { bool enabled=false; glm::mat4 model{1}; glm::vec3 color{.5f}; };
 
@@ -83,6 +106,9 @@ struct BoxState { bool enabled=false; glm::mat4 model{1}; glm::vec3 color{.5f}; 
 // 수정 영역 ①: 번호 0~19의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
 // true인 객체만 표시됩니다. 크기/좌표/색상은 아래 한 곳에서만 설정합니다.
 // 초기 회전각은 {X각,Y각,Z각}, 기본 {0,0,0}입니다. 크기는 양수로 지정합니다.
+// 색상 인자 예: { .9f,.2f,.2f } / Color::Random() / Color::Random(1)
+// Random(1)을 사용한 객체는 모두 같은 랜덤 색입니다. 다른 그룹은 Random(2) 등으로 지정합니다.
+// r 리셋 시 랜덤 색은 다시 추첨하며 같은 그룹끼리는 계속 같은 색을 공유합니다.
 // ============================================================================
 const array<BoxSetting,BOX_COUNT> boxSettings={{
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 0번
@@ -390,6 +416,13 @@ int main()
 // ResetScene: 설정 영역 ①에서 모든 초기값을 다시 읽습니다.
 void ResetScene()
 {
+    static mt19937 randomEngine(random_device{}());
+    uniform_real_distribution<float> randomChannel(RANDOM_COLOR_MIN,RANDOM_COLOR_MAX);
+    map<int,glm::vec3> groupColors; // 매 리셋마다 비워 그룹 색상도 새로 추첨합니다.
+    auto randomColor=[&]()
+    {
+        return glm::vec3(randomChannel(randomEngine),randomChannel(randomEngine),randomChannel(randomEngine));
+    };
     jobs.clear();nextJob=1;slots.fill(0);accumulator=0;
     assemblyPosition=glm::vec3(0);
     cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
@@ -399,7 +432,19 @@ void ResetScene()
     {
         const auto& setting=boxSettings[i];
         boxes[i].enabled=setting.enabled;
-        boxes[i].color=setting.color;
+        boxes[i].color=setting.color.value;
+        if(setting.color.random)
+        {
+            if(setting.color.group<0)
+                boxes[i].color=randomColor();
+            else
+            {
+                auto found=groupColors.find(setting.color.group);
+                if(found==groupColors.end())
+                    found=groupColors.emplace(setting.color.group,randomColor()).first;
+                boxes[i].color=found->second;
+            }
+        }
         glm::mat4 model=glm::translate(glm::mat4(1),setting.center);
         model=model*glm::mat4_cast(glm::quat(glm::radians(setting.angles)));
         boxes[i].model=glm::scale(model,setting.size);
