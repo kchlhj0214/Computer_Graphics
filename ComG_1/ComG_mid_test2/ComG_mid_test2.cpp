@@ -1,0 +1,632 @@
+﻿#include <GL/glew.h>
+#include <GL/glfw3.h>
+#include <GL/glm/glm/glm.hpp>
+#include <GL/glm/glm/ext.hpp>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <array>
+#include <set>
+#include <cmath>
+#include <stdexcept>
+using namespace std;
+
+// ============================================================================
+// 1. 프로그램 설정
+// ============================================================================
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 1200
+#define BOX_COUNT 20
+#define FLOOR_ENABLED 1 // 0: 바닥 숨김, 1: 표시. 방향키 경계는 표시와 무관하게 적용합니다.
+#define FLOOR_WIDTH 4.0f
+#define FLOOR_DEPTH 4.0f
+#define FLOOR_HEIGHT .04f
+#define MOVE_SPEED .75f // 초당 이동 거리
+#define ROTATE_SPEED 90.0f // 초당 회전 각도
+#define SCALE_SPEED .50f // 초당 배율 변화량: +0.5 신축은 1초
+#define GROUP_MOVE_SPEED 1.0f
+#define ANIMATION_FPS 240
+#define CAMERA_X 3.2f
+#define CAMERA_Y 2.6f
+#define CAMERA_Z -4.5f
+#define CAMERA_TARGET_X 0.0f
+#define CAMERA_TARGET_Y .5f
+#define CAMERA_TARGET_Z 0.0f
+#define CAMERA_MOVE_SPEED 1.0f
+#define CAMERA_ROTATE_SPEED 35.0f
+#define CAMERA_RADIUS_MIN .30f
+#define CAMERA_RADIUS_MAX 20.0f
+#define ZOOM_STEP .05f
+#define ORBIT_ENABLED 1
+#define ORBIT_DEGREES 720.0f
+#define ORBIT_PITCH_LIMIT 89.0f
+#define PERSPECTIVE_FOVY 45.0f
+#define PERSPECTIVE_NEAR .1f
+#define PERSPECTIVE_FAR 100.0f
+// 배경색을 바꾸려면 아래 RGB 값을 0~1 범위에서 수정합니다.
+#define BACKGROUND_RED 1.0f
+#define BACKGROUND_GREEN 1.0f
+#define BACKGROUND_BLUE 1.0f
+
+static_assert(MOVE_SPEED>0 && ROTATE_SPEED>0 && SCALE_SPEED>0 && ANIMATION_FPS>0,
+    "Animation speeds must be positive");
+
+// ============================================================================
+// 2. 공통 자료형
+// ============================================================================
+enum class Axis { X, Y, Z }; // 변환 축 / 조립 공간의 고정 X, Y, Z축
+struct Pivot
+{
+    bool point=false;
+    glm::vec3 value{0};
+    static const Pivot Center,Left,Right,Bottom,Top,Front,Back;
+};
+const Pivot Pivot::Center{false,{0,0,0}};
+const Pivot Pivot::Left{false,{-.5f,0,0}};
+const Pivot Pivot::Right{false,{.5f,0,0}};
+const Pivot Pivot::Bottom{false,{0,-.5f,0}};
+const Pivot Pivot::Top{false,{0,.5f,0}};
+const Pivot Pivot::Front{false,{0,0,-.5f}};
+const Pivot Pivot::Back{false,{0,0,.5f}};
+// Point(x,y,z): 방향키 전체 이동을 따라가는 조립 공간의 회전/신축 기준점.
+Pivot Point(float x,float y,float z) { return {true,{x,y,z}}; }
+struct BoxSetting
+{
+    bool enabled=false;
+    glm::vec3 size{.3f},center{0},color{.5f},angles{0};
+};
+struct BoxState { bool enabled=false; glm::mat4 model{1}; glm::vec3 color{.5f}; };
+
+// ============================================================================
+// 수정 영역 ①: 번호 0~19의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
+// true인 객체만 표시됩니다. 크기/좌표/색상은 아래 한 곳에서만 설정합니다.
+// 초기 회전각은 {X각,Y각,Z각}, 기본 {0,0,0}입니다. 크기는 양수로 지정합니다.
+// ============================================================================
+const array<BoxSetting,BOX_COUNT> boxSettings={{
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 0번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 1번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 2번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 3번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 4번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 5번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 6번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 7번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 8번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 9번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 10번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 11번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 12번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 13번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 14번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 15번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 16번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 17번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 18번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 19번
+}};
+
+// ============================================================================
+// 3. 명령 생성: 이 함수들은 애니메이션을 즉시 실행하지 않고 명령을 반환합니다.
+// Run()이 실행을 등록하며, 매 프레임 UpdateScene()에서 진행합니다.
+// ============================================================================
+enum class Kind { Move, Rotate, Scale, Parallel, Sequence, Repeat, PingPong }; // 이동, 회전, 신축, 동시, 순차, 반복, 왕복
+constexpr int Forever=-1;
+struct Command
+{
+    Kind kind=Kind::Move;
+    int id=0,count=1,index=0,cycles=0;
+    glm::vec3 delta{0},pivotPosition{0};
+    Axis axis=Axis::Y;
+    Pivot pivot=Pivot::Center;
+    float amount=0,elapsed=0,duration=0,previous=0;
+    bool started=false,done=false,backward=false;
+    vector<Command> children;
+};
+struct Job { int id; Command command; bool paused=false; };
+array<BoxState,BOX_COUNT> boxes;
+vector<Job> jobs;
+int nextJob=1;
+array<int,9> slots{}; // 예비 키의 작업 번호 저장용. slots[0]~slots[8]
+glm::vec3 assemblyPosition(0);
+glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z),cameraTarget(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
+bool dragging=false;
+int cameraOrbit=0;
+double previousMouseX=0,previousMouseY=0,accumulator=0;
+GLuint programID=0,vao=0,vbo=0;
+GLint modelLocation,viewLocation,projectionLocation,colorLocation;
+
+// Move(번호,{dx,dy,dz}): 해당 단계 시작 위치에서 상대 이동합니다.
+Command Move(int id,glm::vec3 delta)
+{
+    Command c;c.kind=Kind::Move;c.id=id;c.delta=delta;return c;
+}
+// Rotate(번호,축,각도,기준점): -360~+360도. 기준점 생략 시 자기 중심.
+Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center)
+{
+    Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;return c;
+}
+// Scale(번호,축,배율증감,기준점): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
+// 회전한 객체도 조립 공간의 고정 축으로 신축합니다. 기준점 생략 시 자기 중심.
+Command Scale(int id,Axis axis,float change,Pivot pivot=Pivot::Center)
+{
+    Command c;c.kind=Kind::Scale;c.id=id;c.axis=axis;c.amount=change;c.pivot=pivot;return c;
+}
+// Parallel({명령,...}): 모두 동시에 시작하고 가장 긴 명령이 끝나면 완료합니다.
+Command Parallel(initializer_list<Command> commands)
+{
+    Command c;c.kind=Kind::Parallel;c.children=commands;return c;
+}
+// Sequence({명령,...}): 앞 명령 완료 후 다음 명령을 시작합니다.
+Command Sequence(initializer_list<Command> commands)
+{
+    Command c;c.kind=Kind::Sequence;c.children=commands;return c;
+}
+// Repeat(명령,횟수): 매번 현재 상태에서 상대 변환을 반복합니다. Forever는 무한반복.
+Command Repeat(Command command,int count)
+{
+    Command c;c.kind=Kind::Repeat;c.count=count;c.children.push_back(command);return c;
+}
+// PingPong(단일 변환): 이동/회전/신축 한 개를 실행한 뒤 역변환으로 돌아옵니다.
+// 여러 객체의 동시 왕복은 Parallel({PingPong(...),PingPong(...)})로 구성합니다.
+Command PingPong(Command command)
+{
+    Command c;c.kind=Kind::PingPong;c.children.push_back(command);return c;
+}
+
+glm::vec3 AxisVector(Axis axis)
+{
+    return axis==Axis::X ? glm::vec3(1,0,0) : axis==Axis::Y ? glm::vec3(0,1,0) : glm::vec3(0,0,1);
+}
+
+// Validate: 잘못된 설정은 화면을 깨뜨리지 않고 콘솔 오류로 알립니다.
+void Validate(const Command& c)
+{
+    if(c.kind==Kind::Move || c.kind==Kind::Rotate || c.kind==Kind::Scale)
+    {
+        if(c.id<0 || c.id>=BOX_COUNT)throw runtime_error("Box ID must be 0~19");
+        if(!isfinite(c.amount) || !isfinite(c.delta.x) || !isfinite(c.delta.y) || !isfinite(c.delta.z)
+            || !isfinite(c.pivot.value.x) || !isfinite(c.pivot.value.y) || !isfinite(c.pivot.value.z))
+            throw runtime_error("Command values must be finite");
+        if(c.kind==Kind::Rotate && glm::abs(c.amount)>360)throw runtime_error("Rotation must be -360~360");
+        if(c.kind==Kind::Scale && c.amount<=-1)throw runtime_error("Scale change must be greater than -1");
+    }
+    if(c.kind==Kind::Repeat && c.count!=Forever && c.count<1)throw runtime_error("Repeat count must be positive or Forever");
+    if(c.kind==Kind::PingPong && (c.children[0].kind!=Kind::Move && c.children[0].kind!=Kind::Rotate && c.children[0].kind!=Kind::Scale))
+        throw runtime_error("PingPong accepts one Move/Rotate/Scale; combine them with Parallel or Sequence");
+    for(const auto& child:c.children)Validate(child);
+}
+
+void CollectIds(const Command& c,set<int>& ids)
+{
+    if(c.kind==Kind::Move || c.kind==Kind::Rotate || c.kind==Kind::Scale)ids.insert(c.id);
+    for(const auto& child:c.children)CollectIds(child,ids);
+}
+
+// Run(명령): 작업 번호 반환. 이미 실행/일시정지 중인 객체의 중복 작업은 거부합니다.
+// 같은 객체를 동시에 이동·회전하려면 하나의 Parallel 안에 넣습니다.
+int Run(Command command)
+{
+    Validate(command);
+    set<int> wanted;
+    CollectIds(command,wanted);
+    for(const auto& job:jobs)
+        if(!job.command.done)
+        {
+            set<int> occupied;
+            CollectIds(job.command,occupied);
+            for(int id:wanted)
+                if(occupied.count(id))throw runtime_error("Object already has a job. Use Parallel, or finish/cancel the previous job");
+        }
+    int id=nextJob++;
+    jobs.push_back({id,command,false});
+    return id;
+}
+// Pause/Resume: 작업 전체를 현재 상태에서 정지/재개합니다.
+void Pause(int id) { for(auto& j:jobs)if(j.id==id)j.paused=true; }
+void Resume(int id) { for(auto& j:jobs)if(j.id==id)j.paused=false; }
+void TogglePause(int id) { for(auto& j:jobs)if(j.id==id)j.paused=!j.paused; }
+// Cancel: 현재 모습은 유지하고 작업만 끝냅니다. 초기 모습 복원은 r입니다.
+void Cancel(int id) { for(auto& j:jobs)if(j.id==id)j.command.done=true; }
+// IsFinished: 0/없는 번호도 완료로 처리해 최초 시작 조건으로 사용할 수 있습니다.
+bool IsFinished(int id)
+{
+    for(const auto& j:jobs)if(j.id==id)return j.command.done;
+    return true;
+}
+
+// Rewind: 반복할 때 애니메이션 진행 상태만 비우며 도형의 현재 모습은 유지합니다.
+void Rewind(Command& c)
+{
+    c.started=c.done=c.backward=false;
+    c.elapsed=c.previous=0;c.index=c.cycles=0;
+    for(auto& child:c.children)Rewind(child);
+}
+
+// Advance: 주어진 시간만큼 진행하고 완료 후 남은 시간을 반환합니다.
+// 순차 명령에 남은 시간을 전달하므로 프레임 경계에서 불필요하게 멈추지 않습니다.
+float Advance(Command& c,float dt)
+{
+    if(c.done)return dt;
+    if(c.kind==Kind::Parallel)
+    {
+        bool finished=true;
+        float remaining=dt;
+        for(auto& child:c.children)
+        {
+            remaining=glm::min(remaining,Advance(child,dt));
+            finished=finished && child.done;
+        }
+        c.done=finished;
+        return finished ? remaining : 0;
+    }
+    if(c.kind==Kind::Sequence)
+    {
+        while(c.index<(int)c.children.size())
+        {
+            dt=Advance(c.children[c.index],dt);
+            if(!c.children[c.index].done)return 0;
+            ++c.index;
+        }
+        c.done=true;return dt;
+    }
+    if(c.kind==Kind::Repeat)
+    {
+        // 빈 명령/0거리의 무한반복이 프로그램을 멈추지 않도록 한 프레임의 반복 수를 제한합니다.
+        for(int guard=0;guard<128;++guard)
+        {
+            dt=Advance(c.children[0],dt);
+            if(!c.children[0].done)return 0;
+            ++c.cycles;
+            if(c.count!=Forever && c.cycles>=c.count){c.done=true;return dt;}
+            Rewind(c.children[0]);
+            if(dt<=0)return 0;
+        }
+        return 0;
+    }
+    if(c.kind==Kind::PingPong)
+    {
+        Command& child=c.children[0];
+        dt=Advance(child,dt);
+        if(!child.done)return 0;
+        if(!c.backward)
+        {
+            c.backward=true;
+            child.backward=true;child.done=false;child.elapsed=0;
+            // 시작 시 기록한 기준점과 이전 진행값을 유지해 정확한 역변환을 수행합니다.
+            dt=Advance(child,dt);
+        }
+        c.done=child.done;
+        return c.done ? dt : 0;
+    }
+    BoxState& box=boxes[c.id];
+    if(!c.started)
+    {
+        c.started=true;
+        c.pivotPosition=c.pivot.point ? c.pivot.value : glm::vec3(box.model*glm::vec4(c.pivot.value,1));
+        c.duration=c.kind==Kind::Move ? glm::length(c.delta)/MOVE_SPEED
+            : glm::abs(c.amount)/(c.kind==Kind::Rotate ? ROTATE_SPEED : SCALE_SPEED);
+    }
+    float used=glm::min(dt,glm::max(0.0f,c.duration-c.elapsed));
+    c.elapsed+=used;
+    float progress=c.duration>0 ? glm::min(c.elapsed/c.duration,1.0f) : 1.0f;
+    float value=c.backward ? 1-progress : progress;
+    if(box.enabled)
+    {
+        glm::mat4 change(1);
+        if(c.kind==Kind::Move)
+            change=glm::translate(change,c.delta*(value-c.previous));
+        else
+        {
+            change=glm::translate(change,c.pivotPosition);
+            if(c.kind==Kind::Rotate)
+                change=glm::rotate(change,glm::radians(c.amount*(value-c.previous)),AxisVector(c.axis));
+            else
+            {
+                float factor=(1+c.amount*value)/(1+c.amount*c.previous);
+                glm::vec3 scale(1);scale[(int)c.axis]=factor;
+                change=glm::scale(change,scale);
+            }
+            change=glm::translate(change,-c.pivotPosition);
+        }
+        box.model=change*box.model;
+    }
+    c.previous=value;
+    c.done=progress>=1;
+    return c.done ? dt-used : 0;
+}
+
+// ============================================================================
+// 4. 기본 함수 선언과 메인 반복문
+// ============================================================================
+string ReadFile(const char* name);
+bool InitShader();
+void ResetScene();
+void UpdateScene(GLFWwindow*,float);
+void DrawScene(int,int);
+void DrawBox(const glm::mat4&,glm::vec3,glm::vec3);
+void KeyCallback(GLFWwindow*,int,int,int,int);
+void MouseCallback(GLFWwindow*,int,int,int);
+void CursorCallback(GLFWwindow*,double,double);
+void ScrollCallback(GLFWwindow*,double,double);
+int main()
+{
+	if (!glfwInit())return -1;
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Midterm 2 - Box Assembly", nullptr, nullptr);
+	if (!window) { glfwTerminate(); return -1; }
+	glfwMakeContextCurrent(window); glewExperimental = GL_TRUE;
+	if (glewInit() != GLEW_OK || !InitShader()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
+	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
+	glfwSetKeyCallback(window, KeyCallback); glfwSetMouseButtonCallback(window, MouseCallback);
+	glfwSetCursorPosCallback(window, CursorCallback); glfwSetScrollCallback(window, ScrollCallback);
+	glm::vec3 corners[] = { {-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},
+		{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f} };
+	int indices[] = { 0,2,1,0,3,2, 4,5,6,4,6,7, 0,4,7,0,7,3,
+		1,2,6,1,6,5, 3,7,6,3,6,2, 0,1,5,0,5,4 };
+	vector<glm::vec3> vertices;
+	for (int index : indices)vertices.push_back(corners[index]);
+	glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo); glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr); glEnableVertexAttribArray(0); glBindVertexArray(0);
+    ResetScene();
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    cout << "Arrows: assembly | x/X,z/Z: camera axes | y/Y: orbit\n"
+         << "a~l: custom commands | r: reset | q: quit | drag/wheel: camera" << endl;
+	double previousTime = glfwGetTime();
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
+		UpdateScene(window, dt);
+		int width, height; glfwGetFramebufferSize(window, &width, &height);
+		DrawScene(width, height); glfwSwapBuffers(window);
+	}
+	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
+	glfwDestroyWindow(window); glfwTerminate(); return 0;
+}
+
+// ResetScene: 설정 영역 ①에서 모든 초기값을 다시 읽습니다.
+void ResetScene()
+{
+    jobs.clear();nextJob=1;slots.fill(0);accumulator=0;
+    assemblyPosition=glm::vec3(0);
+    cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
+    cameraTarget={CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z};
+    cameraOrbit=0;dragging=false;
+    for(int i=0;i<BOX_COUNT;++i)
+    {
+        const auto& setting=boxSettings[i];
+        boxes[i].enabled=setting.enabled;
+        boxes[i].color=setting.color;
+        glm::mat4 model=glm::translate(glm::mat4(1),setting.center);
+        model=model*glm::mat4_cast(glm::quat(glm::radians(setting.angles)));
+        boxes[i].model=glm::scale(model,setting.size);
+    }
+}
+
+// ============================================================================
+// 5. 애니메이션, 전체 방향키 이동, 카메라
+// ============================================================================
+void UpdateScene(GLFWwindow* window,float dt)
+{
+    accumulator+=dt;
+    const float step=1.0f/ANIMATION_FPS;
+    while(accumulator>=step)
+    {
+        accumulator-=step;
+        for(auto& job:jobs)
+            if(!job.paused && !job.command.done)Advance(job.command,step);
+    }
+    glm::vec3 movement(0);
+    if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)movement.x-=1;
+    if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)movement.x+=1;
+    if(glfwGetKey(window,GLFW_KEY_UP)==GLFW_PRESS)movement.z-=1;
+    if(glfwGetKey(window,GLFW_KEY_DOWN)==GLFW_PRESS)movement.z+=1;
+    if(glm::length(movement)>0)
+    {
+        movement=glm::normalize(movement)*GROUP_MOVE_SPEED*dt;
+        glm::vec3 low(1e20f),high(-1e20f);
+        bool any=false;
+        for(const auto& box:boxes)
+            if(box.enabled)
+            {
+                any=true;
+                for(float x:{-.5f,.5f})for(float y:{-.5f,.5f})for(float z:{-.5f,.5f})
+                {
+                    glm::vec3 p=assemblyPosition+glm::vec3(box.model*glm::vec4(x,y,z,1));
+                    low=glm::min(low,p);high=glm::max(high,p);
+                }
+            }
+        if(any)
+        {
+            // 명령 변환으로 이미 밖에 있다면 더 나가는 이동을 막고 안쪽 복귀만 허용합니다.
+            for(int axis:{0,2})
+            {
+                float edge=(axis==0 ? FLOOR_WIDTH : FLOOR_DEPTH)*.5f;
+                if(movement[axis]>0)movement[axis]=glm::min(movement[axis],glm::max(0.0f,edge-high[axis]));
+                if(movement[axis]<0)movement[axis]=glm::max(movement[axis],glm::min(0.0f,-edge-low[axis]));
+            }
+            assemblyPosition+=movement;
+        }
+    }
+    // 카메라 로컬 +X는 오른쪽, 로컬 +Z는 뒤쪽입니다. Shift는 음의 방향입니다.
+    glm::vec3 forward=glm::normalize(cameraTarget-cameraPosition);
+    glm::vec3 right=glm::normalize(glm::cross(forward,glm::vec3(0,1,0)));
+    bool shift=glfwGetKey(window,GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS
+        || glfwGetKey(window,GLFW_KEY_RIGHT_SHIFT)==GLFW_PRESS;
+    float direction=shift ? -1.0f : 1.0f;
+    glm::vec3 cameraMovement(0);
+    if(glfwGetKey(window,GLFW_KEY_X)==GLFW_PRESS)cameraMovement+=right*direction;
+    if(glfwGetKey(window,GLFW_KEY_Z)==GLFW_PRESS)cameraMovement-=forward*direction;
+    if(glm::length(cameraMovement)>0)
+    {
+        cameraMovement=glm::normalize(cameraMovement)*CAMERA_MOVE_SPEED*dt;
+        cameraPosition+=cameraMovement;cameraTarget+=cameraMovement;
+    }
+    if(cameraOrbit)
+    {
+        glm::mat4 rotation=glm::rotate(glm::mat4(1),glm::radians(cameraOrbit*CAMERA_ROTATE_SPEED*dt),glm::vec3(0,1,0));
+        cameraPosition=glm::vec3(rotation*glm::vec4(cameraPosition,1));
+        cameraTarget=glm::vec3(rotation*glm::vec4(cameraTarget,1));
+    }
+}
+
+void DrawBox(const glm::mat4& model,glm::vec3 size,glm::vec3 color)
+{
+    glm::mat4 transform=glm::scale(model,size);
+    glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(transform));
+    glUniform3fv(colorLocation,1,glm::value_ptr(color));
+    glBindVertexArray(vao);glDrawArrays(GL_TRIANGLES,0,36);
+}
+
+void DrawScene(int width,int height)
+{
+    if(width<=0 || height<=0)return;
+    glViewport(0,0,width,height);
+    glClearColor(BACKGROUND_RED,BACKGROUND_GREEN,BACKGROUND_BLUE,1);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glUseProgram(programID);
+    glm::mat4 view=glm::lookAt(cameraPosition,cameraTarget,glm::vec3(0,1,0));
+    glm::mat4 projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),(float)width/height,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view));
+    glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
+    if(FLOOR_ENABLED)
+        DrawBox(glm::translate(glm::mat4(1),{0,-FLOOR_HEIGHT*.5f,0}),
+            {FLOOR_WIDTH,FLOOR_HEIGHT,FLOOR_DEPTH},{.82f,.88f,.94f});
+    glm::mat4 assembly=glm::translate(glm::mat4(1),assemblyPosition);
+    for(const auto& box:boxes)
+        if(box.enabled)DrawBox(assembly*box.model,glm::vec3(1),box.color);
+    glBindVertexArray(0);
+}
+
+// ============================================================================
+// 수정 영역 ②: 예비 키 9개. 아래 주석을 참고해 원하는 명령만 작성합니다.
+// 명령의 객체 번호는 수정 영역 ①의 0~19와 같습니다.
+//
+// 단일 실행: Run(Move(0,{1,0,0}));
+// 동시 실행: Run(Parallel({Move(0,{1,0,0}),Rotate(1,Axis::Y,90)}));
+// 순차 실행: Run(Sequence({Move(0,{1,0,0}),Rotate(0,Axis::Y,90),Scale(0,Axis::Y,+.5f,Pivot::Bottom)}));
+// 3회 반복: Run(Repeat(Move(0,{.2f,0,0}),3)); // 상대 이동 누적
+// 3회 왕복: Run(Repeat(PingPong(Move(0,{1,0,0})),3));
+// 무한 왕복: slots[0]=Run(Repeat(PingPong(Rotate(0,Axis::Y,90)),Forever));
+// 정지/재개: TogglePause(slots[0]); // Pause, Resume를 따로 사용해도 됩니다.
+// 완료 확인: if(IsFinished(slots[0])) slots[0]=Run(Move(0,{1,0,0}));
+// 현재 상태에서 취소: Cancel(slots[0]);
+// 시작 또는 정지/재개:
+// if(IsFinished(slots[0])) slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0})),Forever));
+// else TogglePause(slots[0]);
+//
+// 하나처럼 회전: 모든 객체에 같은 Point를 지정합니다. 각자 Center를 사용하면 제자리 회전입니다.
+// Run(Parallel({Rotate(0,Axis::Y,90,Point(0,0,0)),Rotate(1,Axis::Y,90,Point(0,0,0))}));
+// 같은 객체에 동시 변환을 주면 고정 시간 간격마다 목록 순서로 합성합니다.
+// 무한반복을 Sequence 중간에 넣으면 뒤 명령은 실행되지 않습니다.
+// 비활성 객체는 보이지 않고 변환도 적용하지 않습니다. 명령의 진행 시간은 유지합니다.
+// ============================================================================
+void CustomKey(int key)
+{
+    switch(key)
+    {
+    case GLFW_KEY_A:
+        // a 명령
+        break;
+    case GLFW_KEY_S:
+        // s 명령
+        break;
+    case GLFW_KEY_D:
+        // d 명령
+        break;
+    case GLFW_KEY_F:
+        // f 명령
+        break;
+    case GLFW_KEY_G:
+        // g 명령
+        break;
+    case GLFW_KEY_H:
+        // h 명령
+        break;
+    case GLFW_KEY_J:
+        // j 명령
+        break;
+    case GLFW_KEY_K:
+        // k 명령
+        break;
+    case GLFW_KEY_L:
+        // l 명령
+        break;
+    }
+}
+
+void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
+{
+    if(action!=GLFW_PRESS)return;
+    if(key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window,true);
+    if(key==GLFW_KEY_R)ResetScene();
+    if(key==GLFW_KEY_Y)
+    {
+        int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
+        cameraOrbit=cameraOrbit==direction ? 0 : direction;
+    }
+    try { CustomKey(key); }
+    catch(const exception& error) { cerr << "Command error: " << error.what() << endl; }
+}
+
+void MouseCallback(GLFWwindow* window,int button,int action,int)
+{
+    if(button!=GLFW_MOUSE_BUTTON_LEFT)return;
+    dragging=ORBIT_ENABLED && action==GLFW_PRESS;
+    if(dragging)glfwGetCursorPos(window,&previousMouseX,&previousMouseY);
+}
+void CursorCallback(GLFWwindow* window,double x,double y)
+{
+    if(!dragging)return;
+    int width,height;glfwGetWindowSize(window,&width,&height);
+    if(width<=0 || height<=0)return;
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::length(offset);
+    float yaw=glm::atan(offset.x,offset.z),pitch=glm::asin(glm::clamp(offset.y/radius,-1.0f,1.0f));
+    yaw-=glm::radians(ORBIT_DEGREES)*(float)(x-previousMouseX)/width;
+    pitch+=glm::radians(ORBIT_DEGREES)*(float)(y-previousMouseY)/height;
+    pitch=glm::clamp(pitch,-glm::radians(ORBIT_PITCH_LIMIT),glm::radians(ORBIT_PITCH_LIMIT));
+    cameraPosition=cameraTarget+radius*glm::vec3(glm::cos(pitch)*glm::sin(yaw),glm::sin(pitch),glm::cos(pitch)*glm::cos(yaw));
+    previousMouseX=x;previousMouseY=y;
+}
+void ScrollCallback(GLFWwindow*,double,double yoffset)
+{
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::clamp(glm::length(offset)-(float)yoffset*ZOOM_STEP,CAMERA_RADIUS_MIN,CAMERA_RADIUS_MAX);
+    cameraPosition=cameraTarget+glm::normalize(offset)*radius;
+}
+
+// ============================================================================
+// 6. 셰이더 읽기와 컴파일
+// ============================================================================
+string ReadFile(const char* name)
+{
+	ifstream file(name);
+	if (!file) { cerr << "Cannot open shader: " << name << endl; return ""; }
+	stringstream stream; stream << file.rdbuf(); return stream.str();
+}
+
+bool InitShader()
+{
+	string sources[2] = { ReadFile("vertex.glsl"), ReadFile("fragment.glsl") };
+	if (sources[0].empty() || sources[1].empty()) return false;
+	GLuint shaders[2] = { glCreateShader(GL_VERTEX_SHADER), glCreateShader(GL_FRAGMENT_SHADER) };
+	for (int i = 0; i < 2; ++i) {
+		const char* code = sources[i].c_str(); glShaderSource(shaders[i], 1, &code, nullptr);
+		glCompileShader(shaders[i]); GLint ok; glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &ok);
+		if (!ok) { char log[1024]; glGetShaderInfoLog(shaders[i], 1024, nullptr, log); cerr << log << endl; return false; }
+	}
+	programID = glCreateProgram();
+	glAttachShader(programID, shaders[0]); glAttachShader(programID, shaders[1]); glLinkProgram(programID);
+	GLint ok; glGetProgramiv(programID, GL_LINK_STATUS, &ok);
+	if (!ok) { char log[1024]; glGetProgramInfoLog(programID, 1024, nullptr, log); cerr << log << endl; return false; }
+	glDeleteShader(shaders[0]); glDeleteShader(shaders[1]);
+	modelLocation = glGetUniformLocation(programID, "modelTransform");
+	viewLocation = glGetUniformLocation(programID, "viewTransform");
+	projectionLocation = glGetUniformLocation(programID, "projectionTransform");
+	colorLocation = glGetUniformLocation(programID, "uColor");
+	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
+}

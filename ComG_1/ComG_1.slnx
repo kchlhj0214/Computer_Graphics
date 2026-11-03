@@ -30,4 +30,5 @@
   <Project Path="ComG_1_9/ComG_1_9.vcxproj" Id="4283627a-f5d9-4edc-a037-70852a1f0ef2" />
   <Project Path="ComG_mid_test/ComG_mid_test.vcxproj" Id="000bd112-651a-48a1-9392-99d032937e06" />
   <Project Path="ComG_mid_test1/ComG_mid_test1.vcxproj" Id="b3811144-d0a1-4b67-873a-17c594974e19" />
+  <Project Path="ComG_mid_test2/ComG_mid_test2.vcxproj" Id="6bc3e42b-6074-45a9-8e4d-03f3583f6c58" />
 </Solution>
