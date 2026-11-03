@@ -49,6 +49,9 @@ using namespace std;
 #define PERSPECTIVE_FOVY 45.0f
 #define PERSPECTIVE_NEAR .1f
 #define PERSPECTIVE_FAR 100.0f
+#define WIREFRAME_INITIAL 0 // 0: 솔리드, 1: 와이어 (객체에 적용)
+#define PERSPECTIVE_INITIAL 1 // 0: 직교, 1: 원근
+#define HIDDEN_SURFACE_INITIAL 1 // 0: 은면 제거 끔, 1: 깊이 검사와 뒷면 컬링 켬
 // 배경색을 바꾸려면 아래 RGB 값을 0~1 범위에서 수정합니다.
 #define BACKGROUND_RED 1.0f
 #define BACKGROUND_GREEN 1.0f
@@ -158,6 +161,7 @@ array<int,9> slots{}; // 예비 키의 작업 번호 저장용. slots[0]~slots[8
 glm::vec3 assemblyPosition(0);
 glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z),cameraTarget(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
 bool dragging=false;
+bool wireframe=WIREFRAME_INITIAL,perspective=PERSPECTIVE_INITIAL,hiddenSurface=HIDDEN_SURFACE_INITIAL;
 int cameraOrbit=0;
 double previousMouseX=0,previousMouseY=0,accumulator=0;
 GLuint programID=0,vao=0,vbo=0;
@@ -401,7 +405,8 @@ int main()
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     cout << "Arrows: assembly | x/X,z/Z: camera axes | y/Y: orbit\n"
-         << "a~l: custom commands | r: reset | q: quit | drag/wheel: camera" << endl;
+         << "a~l: custom commands | w: wire | t: projection | e: hidden surfaces\n"
+         << "r: reset | q: quit | drag/wheel: camera" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
@@ -416,6 +421,9 @@ int main()
 // ResetScene: 설정 영역 ①에서 모든 초기값을 다시 읽습니다.
 void ResetScene()
 {
+    wireframe=WIREFRAME_INITIAL;
+    perspective=PERSPECTIVE_INITIAL;
+    hiddenSurface=HIDDEN_SURFACE_INITIAL;
     static mt19937 randomEngine(random_device{}());
     uniform_real_distribution<float> randomChannel(RANDOM_COLOR_MIN,RANDOM_COLOR_MAX);
     map<int,glm::vec3> groupColors; // 매 리셋마다 비워 그룹 색상도 새로 추첨합니다.
@@ -529,20 +537,44 @@ void DrawBox(const glm::mat4& model,glm::vec3 size,glm::vec3 color)
 void DrawScene(int width,int height)
 {
     if(width<=0 || height<=0)return;
+    if(hiddenSurface)
+    {
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+    }
+    else
+    {
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+    }
     glViewport(0,0,width,height);
     glClearColor(BACKGROUND_RED,BACKGROUND_GREEN,BACKGROUND_BLUE,1);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     glUseProgram(programID);
     glm::mat4 view=glm::lookAt(cameraPosition,cameraTarget,glm::vec3(0,1,0));
-    glm::mat4 projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),(float)width/height,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    float aspect=(float)width/height;
+    glm::mat4 projection;
+    if(perspective)
+        projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),aspect,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    else
+    {
+        // 주시점 깊이에서 원근 투영과 같은 크기가 되도록 범위를 계산합니다.
+        // 카메라 거리와 연동하여 직교 투영에서도 기존 휠 확대·축소가 작동합니다.
+        float halfHeight=glm::length(cameraPosition-cameraTarget)*glm::tan(glm::radians(PERSPECTIVE_FOVY)*.5f);
+        projection=glm::ortho(-halfHeight*aspect,halfHeight*aspect,-halfHeight,halfHeight,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    }
     glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view));
     glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
+    glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
     if(FLOOR_ENABLED)
         DrawBox(glm::translate(glm::mat4(1),{0,-FLOOR_HEIGHT*.5f,0}),
             {FLOOR_WIDTH,FLOOR_HEIGHT,FLOOR_DEPTH},{.82f,.88f,.94f});
     glm::mat4 assembly=glm::translate(glm::mat4(1),assemblyPosition);
+    glPolygonMode(GL_FRONT_AND_BACK,wireframe ? GL_LINE : GL_FILL);
     for(const auto& box:boxes)
         if(box.enabled)DrawBox(assembly*box.model,glm::vec3(1),box.color);
+    glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
     glBindVertexArray(0);
 }
 
@@ -608,6 +640,9 @@ void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
     if(action!=GLFW_PRESS)return;
     if(key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window,true);
     if(key==GLFW_KEY_R)ResetScene();
+    if(key==GLFW_KEY_W)wireframe=!wireframe;
+    if(key==GLFW_KEY_T)perspective=!perspective;
+    if(key==GLFW_KEY_E)hiddenSurface=!hiddenSurface;
     if(key==GLFW_KEY_Y)
     {
         int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
