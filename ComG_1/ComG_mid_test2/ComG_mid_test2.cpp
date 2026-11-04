@@ -1,4 +1,7 @@
-﻿#include <GL/glew.h>
+﻿//프로젝트속성->링커->명령줄에다음과같이3개의라이브러리추가
+//-> opengl32.lib glew32.lib glfw3.lib glu32.lib
+
+#include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <GL/glm/glm/glm.hpp>
 #include <GL/glm/glm/ext.hpp>
@@ -20,7 +23,14 @@ using namespace std;
 // ============================================================================
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
-#define BOX_COUNT 20
+#define BOX_COUNT 40
+#define PLAYER_BODY 31
+#define PLAYER_SPEED .65f
+#define PLAYER_WALK_ANGLE 25.0f
+#define PLAYER_PHASE_SPEED 10.0f
+#define PLAYER_JUMP_HEIGHT .85f
+#define PLAYER_JUMP_SECONDS 1.0f
+#define PLAYER_DESCEND_SPEED 1.5f
 #define RANDOM_COLOR_MIN .10f
 #define RANDOM_COLOR_MAX .90f
 #define FLOOR_ENABLED 1 // 0: 바닥 숨김, 1: 표시. 방향키 경계는 표시와 무관하게 적용합니다.
@@ -102,11 +112,29 @@ struct BoxSetting
     glm::vec3 size{.3f},center{0};
     Color color;
     glm::vec3 angles{0};
+    int parent=-1; // -1: 기존 독립 객체, 0~39: 부모 객체 번호
+    bool inheritScale=false; // false: 자기 크기 유지, true: 부모 신축도 상속
 };
-struct BoxState { bool enabled=false; glm::mat4 model{1}; glm::vec3 color{.5f}; };
+struct BoxState
+{
+    bool enabled=false,visible=false;
+    glm::mat4 model{1},world{1},animation{1}; // model: 부모 기준 변환, world: 상속을 합성한 조립 공간 변환
+    glm::vec3 color{.5f},baseSize{1};
+    int parent=-1;
+    bool inheritScale=false;
+};
 
 // ============================================================================
-// 수정 영역 ①: 번호 0~19의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
+// 수정 영역 ①: 번호 0~39의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
+// 마지막에 부모 번호와 신축 상속을 선택적으로 추가합니다. 생략하면 기존과 완전히 같습니다.
+// {true,{크기},{위치},색상,{각도},부모번호,신축상속}
+// 부모가 있으면 위치·Move·회전축·Point 좌표는 부모 중심 기준이며, 단위는 기존과 같은 길이입니다.
+// 부모 신축 시 위치는 함께 이동합니다. false이면 자식 크기는 유지하고 true이면 크기도 상속합니다.
+// 예: {true,{.3f,.5f,.2f},{0,.7f,0},Color::Random(),{0,0,0},-1,false}, // 몸통 0번
+// 예: {true,{.1f,.4f,.1f},{-.23f,0,0},Color::Random(),{0,0,0},0,false}, // 왼팔 1번
+// 이 예에서는 팔 윗면이 몸통 중심보다 .2 위에 있습니다. 상대 좌표로 부착 위치를 조정합니다.
+// 부모의 이동·회전은 모든 후손에게 전달됩니다. 자식 변환은 부모에 영향을 주지 않습니다.
+// 부모가 비활성화되면 자식도 숨깁니다. 자기 자신/순환 연결/범위 밖 부모 번호는 허용하지 않습니다.
 // true인 객체만 표시됩니다. 크기/좌표/색상은 아래 한 곳에서만 설정합니다.
 // 초기 회전각은 {X각,Y각,Z각}, 기본 {0,0,0}입니다. 크기는 양수로 지정합니다.
 // 색상 인자 예: { .9f,.2f,.2f } / Color::Random() / Color::Random(1)
@@ -134,6 +162,27 @@ const array<BoxSetting,BOX_COUNT> boxSettings={{
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 17번
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 18번
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 19번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 20번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 21번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 22번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 23번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 24번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 25번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 26번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 27번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 28번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 29번
+    {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 30번
+    {true, {.26f,.32f,.16f}, {.9f,.48f,.8f}, {.15f,.65f,.80f}, {0,0,0}}, // 31 몸통
+    {true, {.075f,.30f,.075f}, {-.195f,0,0}, {.85f,.25f,.20f}, {0,0,0},31,false}, // 32 왼팔
+    {true, {.075f,.30f,.075f}, {.195f,0,0}, {.20f,.40f,.85f}, {0,0,0},31,false}, // 33 오른팔
+    {true, {.09f,.32f,.09f}, {-.065f,-.32f,0}, {.30f,.25f,.80f}, {0,0,0},31,false}, // 34 왼다리
+    {true, {.09f,.32f,.09f}, {.065f,-.32f,0}, {.65f,.20f,.70f}, {0,0,0},31,false}, // 35 오른다리
+    {true, {.20f,.20f,.20f}, {0,.26f,0}, {.85f,.70f,.50f}, {0,0,0},31,false}, // 36 머리
+    {true, {.045f,.045f,.055f}, {0,-.015f,-.1275f}, {.90f,.45f,.20f}, {0,0,0},36,false}, // 37 코
+    {true, {.035f,.025f,.012f}, {-.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0},36,false}, // 38 왼눈
+    {true, {.035f,.025f,.012f}, {.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0},36,false}, // 39 오른눈
+
 }};
 
 // ============================================================================
@@ -158,6 +207,9 @@ struct Command
 };
 struct Job { int id; Command command; bool paused=false; };
 array<BoxState,BOX_COUNT> boxes;
+bool playerWalking=false,playerJumping=false;
+glm::vec3 playerOffset(0),playerDirection(0,0,-1);
+float playerPhase=0,playerJumpTime=0,playerJumpStart=0,playerInitialFoot=0;
 vector<Job> jobs;
 int nextJob=1;
 array<int,9> slots{}; // 예비 키의 작업 번호 저장용. slots[0]~slots[8]
@@ -170,6 +222,148 @@ double previousMouseX=0,previousMouseY=0,accumulator=0;
 GLuint programID=0,vao=0,vbo=0;
 GLint modelLocation,viewLocation,projectionLocation,colorLocation;
 
+// EvaluateHierarchy: 부모를 먼저 계산합니다. 부모의 초기 크기는 좌표 단위에 곱하지 않습니다.
+void EvaluateHierarchy()
+{
+    array<int,BOX_COUNT> state{};
+    auto evaluate=[&](auto&& self,int id)->void
+    {
+        if(state[id]==2)return;
+        if(state[id]==1)throw runtime_error("Parent hierarchy contains a cycle");
+        state[id]=1;
+        auto& box=boxes[id];
+        box.visible=box.enabled;
+        glm::mat4 local=box.animation*box.model;
+        box.world=local;
+        if(box.parent!=-1)
+        {
+            if(box.parent<0 || box.parent>=BOX_COUNT)throw runtime_error("Parent ID must be -1 or 0~39");
+            self(self,box.parent);
+            const auto& parent=boxes[box.parent];
+            box.visible=box.visible && parent.visible;
+            glm::mat4 frame=parent.world*glm::scale(glm::mat4(1),glm::vec3(1)/parent.baseSize);
+            if(box.inheritScale)
+                box.world=frame*local;
+            else
+            {
+                // 크기는 제거하고 회전만 추출합니다. 연결 위치는 신축된 부모를 따라갑니다.
+                glm::vec3 x=glm::normalize(glm::vec3(frame[0]));
+                glm::vec3 y=glm::vec3(frame[1])-x*glm::dot(x,glm::vec3(frame[1]));
+                y=glm::normalize(y);
+                glm::vec3 z=glm::normalize(glm::cross(x,y));
+                glm::mat4 rotation(1);
+                rotation[0]=glm::vec4(x,0);rotation[1]=glm::vec4(y,0);rotation[2]=glm::vec4(z,0);
+                box.world=rotation*local;
+                box.world[3]=frame*glm::vec4(glm::vec3(local[3]),1);
+            }
+        }
+        state[id]=2;
+    };
+    for(int i=0;i<BOX_COUNT;++i)evaluate(evaluate,i);
+}
+
+// 사람 샘플: 31 몸통 → 32~36 팔다리/머리 → 37~39 코/눈.
+// 기본 model을 덮어쓰지 않고 별도 animation 행렬로 걷기·점프를 합성합니다.
+// 크기/색상/상대 위치는 위의 31~39 설정에서 수정합니다. 몸통을 끄면 전체가 숨습니다.
+bool IsPlayerPart(int id)
+{
+    for(int depth=0;id>=0 && depth<BOX_COUNT;++depth)
+    {
+        if(id==PLAYER_BODY)return true;
+        id=boxes[id].parent;
+    }
+    return false;
+}
+
+pair<glm::vec3,glm::vec3> BoxBounds(const glm::mat4& model)
+{
+    glm::vec3 low(1e20f),high(-1e20f);
+    for(float x:{-.5f,.5f})for(float y:{-.5f,.5f})for(float z:{-.5f,.5f})
+    {
+        glm::vec3 p(model*glm::vec4(x,y,z,1));
+        low=glm::min(low,p);high=glm::max(high,p);
+    }
+    return {low,high};
+}
+
+void PosePlayer()
+{
+    glm::vec3 center(boxes[PLAYER_BODY].model[3]);
+    glm::mat4 pose=glm::translate(glm::mat4(1),playerOffset+center);
+    pose=glm::rotate(pose,glm::atan(-playerDirection.x,-playerDirection.z),glm::vec3(0,1,0));
+    boxes[PLAYER_BODY].animation=glm::translate(pose,-center);
+    float angle=playerWalking ? glm::radians(PLAYER_WALK_ANGLE)*glm::sin(playerPhase) : 0;
+    for(int id=32;id<=35;++id)
+    {
+        float sign=(id==32 || id==35) ? 1.0f : -1.0f;
+        glm::vec3 top(boxes[id].model*glm::vec4(0,.5f,0,1));
+        glm::mat4 swing=glm::translate(glm::mat4(1),top);
+        swing=glm::rotate(swing,sign*angle,glm::vec3(1,0,0));
+        boxes[id].animation=glm::translate(swing,-top);
+    }
+    EvaluateHierarchy();
+}
+
+// PlayerSupport: 발 아래에 있는 장애물 윗면 높이를 구합니다.
+float PlayerSupport(glm::vec3 center,float radius,float feet)
+{
+    float support=0;
+    for(int i=0;i<BOX_COUNT;++i)
+        if(boxes[i].visible && !IsPlayerPart(i))
+        {
+            auto [low,high]=BoxBounds(boxes[i].world);
+            if(center.x+radius>low.x && center.x-radius<high.x
+                && center.z+radius>low.z && center.z-radius<high.z && feet>=high.y-.0001f)
+                support=glm::max(support,high.y);
+        }
+    return support;
+}
+
+void UpdatePlayer(float dt)
+{
+    if(!boxes[PLAYER_BODY].enabled)return;
+    PosePlayer();
+    glm::vec3 center(boxes[PLAYER_BODY].world[3]);
+    float radius=.01f,height=.01f;
+    float feet=playerInitialFoot+playerOffset.y;
+    for(int id=0;id<BOX_COUNT;++id)
+        if(boxes[id].visible && IsPlayerPart(id))
+        {
+            auto [low,high]=BoxBounds(boxes[id].world);
+            radius=glm::max(radius,glm::max(glm::max(center.x-low.x,high.x-center.x),glm::max(center.z-low.z,high.z-center.z)));
+            height=glm::max(height,high.y-feet);
+        }
+    float nextFeet=glm::max(0.0f,feet-PLAYER_DESCEND_SPEED*dt);
+    if(playerJumping)
+    {
+        playerJumpTime=glm::min(playerJumpTime+dt,PLAYER_JUMP_SECONDS);
+        float t=playerJumpTime/PLAYER_JUMP_SECONDS;
+        nextFeet=playerJumpStart+PLAYER_JUMP_HEIGHT*(t<.5f ? 2*t : 2*(1-t));
+    }
+    glm::vec3 candidate=center;
+    if(playerWalking)candidate+=playerDirection*PLAYER_SPEED*dt;
+    glm::vec3 worldCenter=candidate+assemblyPosition;
+    bool blocked=glm::abs(worldCenter.x)>FLOOR_WIDTH*.5f-radius || glm::abs(worldCenter.z)>FLOOR_DEPTH*.5f-radius;
+    for(int id=0;id<BOX_COUNT;++id)
+        if(boxes[id].visible && !IsPlayerPart(id))
+        {
+            auto [low,high]=BoxBounds(boxes[id].world);
+            if(candidate.x+radius>low.x && candidate.x-radius<high.x
+                && candidate.z+radius>low.z && candidate.z-radius<high.z
+                && glm::max(feet,nextFeet)<high.y-.0001f && glm::min(feet,nextFeet)+height>low.y)
+                blocked=true;
+        }
+    if(blocked && playerWalking)playerDirection=-playerDirection;
+    else {playerOffset.x+=candidate.x-center.x;playerOffset.z+=candidate.z-center.z;center=candidate;}
+    float support=PlayerSupport(center,radius,feet);
+    bool descending=!playerJumping || playerJumpTime>=PLAYER_JUMP_SECONDS*.5f;
+    if(descending && nextFeet<=support){nextFeet=support;playerJumping=false;}
+    if(playerJumping && playerJumpTime>=PLAYER_JUMP_SECONDS)playerJumping=false;
+    playerOffset.y=nextFeet-playerInitialFoot;
+    if(playerWalking)playerPhase=glm::mod(playerPhase+PLAYER_SPEED*PLAYER_PHASE_SPEED*dt,glm::two_pi<float>());
+    PosePlayer();
+}
+
 // Move(번호,{dx,dy,dz},시간): 해당 단계 시작 위치에서 상대 이동합니다. 시간은 초 단위입니다.
 Command Move(int id,glm::vec3 delta,float seconds=0)
 {
@@ -177,8 +371,9 @@ Command Move(int id,glm::vec3 delta,float seconds=0)
 }
 // Rotate(번호,축,각도,기준점,시간): -360~+360도. 기준점 생략 시 자기 중심.
 // Center 회전은 매 순간 현재 중심을 따라갑니다. 이동이나 공전과 함께 실행해도 제자리 자전합니다.
-// 축 방향은 조립 공간의 고정 축입니다. 객체의 로컬 축을 사용하는 것은 아닙니다.
+// 축 방향은 부모가 없으면 조립 공간의 고정 축, 있으면 부모를 따라 회전하는 축입니다.
 // Point는 지정 좌표, 면 기준점은 회전 시작 시의 위치를 계속 사용합니다.
+// 부모가 있는 경우 아래 설명의 조립 공간은 해당 부모 좌표계를 뜻합니다.
 // 1. 번호: boxSettings의 객체 번호(0~BOX_COUNT-1). 활성화된 객체만 화면에서 변환됩니다.
 // 2. 축: Axis::X / Axis::Y / Axis::Z. 기준점을 지나며 조립 공간의 해당 축과 평행한 회전축입니다.
 // 3. 각도: 도 단위 상대 회전량(-360~360). 최종 절대 각도가 아니라 현재 자세에서 추가로 회전할 양입니다.
@@ -199,7 +394,8 @@ Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float se
     Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;c.seconds=seconds;return c;
 }
 // Scale(번호,축,배율증감,기준점,시간): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
-// 회전한 객체도 조립 공간의 고정 축으로 신축합니다. 기준점 생략 시 자기 중심.
+// 부모가 없으면 조립 공간 축, 있으면 부모 좌표계 축으로 신축합니다. 기본 기준점은 자기 중심.
+// 부모가 있는 경우 아래 설명의 조립 공간은 해당 부모 좌표계를 뜻합니다.
 // 1. 번호: boxSettings의 객체 번호(0~BOX_COUNT-1). 활성화된 객체만 화면에서 변환됩니다.
 // 2. 축: Axis::X / Axis::Y / Axis::Z. 선택한 조립 공간 축 방향만 신축하고 나머지 방향은 유지합니다.
 //    객체가 기울어져 있어도 로컬 축이 아닌 고정 축을 사용하므로 모양이 비스듬히 변형될 수 있습니다.
@@ -271,13 +467,17 @@ void Validate(const Command& c)
         if(c.children[0].id==c.children[1].id)throw runtime_error("Swap requires two different objects");
         for(const auto& child:c.children)
         {
-            if(child.id<0 || child.id>=BOX_COUNT)throw runtime_error("Box ID must be 0~19");
+            if(child.id<0 || child.id>=BOX_COUNT)throw runtime_error("Box ID must be 0~39");
             if(!boxes[child.id].enabled)throw runtime_error("Swap requires enabled objects");
         }
+        const auto& first=boxes[c.children[0].id];
+        const auto& second=boxes[c.children[1].id];
+        if(first.parent!=second.parent || first.inheritScale!=second.inheritScale)
+            throw runtime_error("Swap requires the same parent and scale inheritance");
     }
     if(c.kind==Kind::Move || c.kind==Kind::Rotate || c.kind==Kind::Scale)
     {
-        if(c.id<0 || c.id>=BOX_COUNT)throw runtime_error("Box ID must be 0~19");
+        if(c.id<0 || c.id>=BOX_COUNT)throw runtime_error("Box ID must be 0~39");
         if(!isfinite(c.seconds) || c.seconds<0)throw runtime_error("Duration must be finite and nonnegative");
         if(!isfinite(c.amount) || !isfinite(c.delta.x) || !isfinite(c.delta.y) || !isfinite(c.delta.z)
             || !isfinite(c.pivot.value.x) || !isfinite(c.pivot.value.y) || !isfinite(c.pivot.value.z))
@@ -301,6 +501,7 @@ void CollectIds(const Command& c,set<int>& ids)
 // 같은 객체를 동시에 이동·회전하려면 하나의 Parallel 안에 넣습니다.
 int Run(Command command)
 {
+    EvaluateHierarchy();
     Validate(command);
     set<int> wanted;
     CollectIds(command,wanted);
@@ -520,7 +721,7 @@ int main()
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     cout << "Arrows: assembly | x/X,z/Z: camera axes | y/Y: orbit\n"
-         << "a~l: custom commands | w: wire | t: projection | e: hidden surfaces\n"
+         << "v/b/n/m: walk | Space: jump | a~l: custom commands | w: wire | t: projection | e: hidden surfaces\n"
          << "r: reset | q: quit | drag/wheel: camera" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
@@ -547,6 +748,8 @@ void ResetScene()
         return glm::vec3(randomChannel(randomEngine),randomChannel(randomEngine),randomChannel(randomEngine));
     };
     jobs.clear();nextJob=1;slots.fill(0);accumulator=0;
+    playerWalking=playerJumping=false;playerOffset=glm::vec3(0);playerDirection={0,0,-1};
+    playerPhase=playerJumpTime=playerJumpStart=0;
     assemblyPosition=glm::vec3(0);
     cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
     cameraTarget={CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z};
@@ -554,6 +757,12 @@ void ResetScene()
     for(int i=0;i<BOX_COUNT;++i)
     {
         const auto& setting=boxSettings[i];
+        if(setting.size.x<=0 || setting.size.y<=0 || setting.size.z<=0)
+            throw runtime_error("Initial box size must be positive");
+        boxes[i].animation=glm::mat4(1);
+        boxes[i].parent=setting.parent;
+        boxes[i].inheritScale=setting.inheritScale;
+        boxes[i].baseSize=setting.size;
         boxes[i].enabled=setting.enabled;
         boxes[i].color=setting.color.value;
         if(setting.color.random)
@@ -572,6 +781,12 @@ void ResetScene()
         model=model*glm::mat4_cast(glm::quat(glm::radians(setting.angles)));
         boxes[i].model=glm::scale(model,setting.size);
     }
+    EvaluateHierarchy();
+    playerInitialFoot=1e20f;
+    for(int id=0;id<BOX_COUNT;++id)
+        if(boxes[id].visible && IsPlayerPart(id))
+            playerInitialFoot=glm::min(playerInitialFoot,BoxBounds(boxes[id].world).first.y);
+    if(playerInitialFoot==1e20f)playerInitialFoot=0;
 }
 
 // ============================================================================
@@ -586,7 +801,9 @@ void UpdateScene(GLFWwindow* window,float dt)
         accumulator-=step;
         for(auto& job:jobs)
             if(!job.paused && !job.command.done)Advance(job.command,step);
+        UpdatePlayer(step);
     }
+    EvaluateHierarchy();
     glm::vec3 movement(0);
     if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)movement.x-=1;
     if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)movement.x+=1;
@@ -598,12 +815,12 @@ void UpdateScene(GLFWwindow* window,float dt)
         glm::vec3 low(1e20f),high(-1e20f);
         bool any=false;
         for(const auto& box:boxes)
-            if(box.enabled)
+            if(box.visible)
             {
                 any=true;
                 for(float x:{-.5f,.5f})for(float y:{-.5f,.5f})for(float z:{-.5f,.5f})
                 {
-                    glm::vec3 p=assemblyPosition+glm::vec3(box.model*glm::vec4(x,y,z,1));
+                    glm::vec3 p=assemblyPosition+glm::vec3(box.world*glm::vec4(x,y,z,1));
                     low=glm::min(low,p);high=glm::max(high,p);
                 }
             }
@@ -652,6 +869,7 @@ void DrawBox(const glm::mat4& model,glm::vec3 size,glm::vec3 color)
 void DrawScene(int width,int height)
 {
     if(width<=0 || height<=0)return;
+    EvaluateHierarchy();
     if(hiddenSurface)
     {
         glEnable(GL_DEPTH_TEST);
@@ -688,14 +906,22 @@ void DrawScene(int width,int height)
     glm::mat4 assembly=glm::translate(glm::mat4(1),assemblyPosition);
     glPolygonMode(GL_FRONT_AND_BACK,wireframe ? GL_LINE : GL_FILL);
     for(const auto& box:boxes)
-        if(box.enabled)DrawBox(assembly*box.model,glm::vec3(1),box.color);
+        if(box.visible)DrawBox(assembly*box.world,glm::vec3(1),box.color);
     glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
     glBindVertexArray(0);
 }
 
 // ============================================================================
+// 상속 예시: 0번 몸통, 1번 팔(parent=0)을 설정한 경우
+// Run(Repeat(PingPong(Rotate(1,Axis::X,30,Pivot::Top,1.0f)),Forever));
+// Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f));
+// 위 두 작업은 함께 실행 가능합니다. 몸통이 돌아도 팔의 어깨와 흔드는 축이 함께 돌아갑니다.
+// 팔의 Point(...)는 부모 중심 기준이며, Pivot::Top은 부모 공간에서 기록한 팔의 윗면입니다.
+// 부모와 자식에게 같은 전체 이동/회전을 중복 지정하면 두 번 적용되므로 전체 동작은 부모만 지정합니다.
+// Swap은 부모 번호와 inheritScale 설정이 같은 두 객체 사이에서 사용합니다.
+// 부모 없는 기존 객체 설정과 함수 호출은 변경할 필요가 없습니다.
 // 수정 영역 ②: 예비 키 9개. 아래 주석을 참고해 원하는 명령만 작성합니다.
-// 명령의 객체 번호는 수정 영역 ①의 0~19와 같습니다.
+// 명령의 객체 번호는 수정 영역 ①의 0~39와 같습니다.
 //
 // 단일 실행: Run(Move(0,{1,0,0}));
 // 스왑: Run(Swap(0,1,2.0f)); // 두 객체의 중심 위치를 2초 동안 교환합니다.
@@ -784,6 +1010,28 @@ void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
 {
     if(action!=GLFW_PRESS)return;
     if(key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window,true);
+    // 이동키를 한 번 누르면 계속 걷습니다. 초기 상태는 정지입니다.
+    if(key==GLFW_KEY_V){playerDirection={0,0,-1};playerWalking=true;}
+    if(key==GLFW_KEY_B){playerDirection={0,0,1};playerWalking=true;}
+    if(key==GLFW_KEY_N){playerDirection={-1,0,0};playerWalking=true;}
+    if(key==GLFW_KEY_M){playerDirection={1,0,0};playerWalking=true;}
+    if(key==GLFW_KEY_SPACE && boxes[PLAYER_BODY].enabled && !playerJumping)
+    {
+        PosePlayer();
+        float feet=playerInitialFoot+playerOffset.y;
+        float radius=0;
+        glm::vec3 center(boxes[PLAYER_BODY].world[3]);
+        for(int id=0;id<BOX_COUNT;++id)
+            if(boxes[id].visible && IsPlayerPart(id))
+            {
+                auto [low,high]=BoxBounds(boxes[id].world);
+                radius=glm::max(radius,glm::max(glm::max(center.x-low.x,high.x-center.x),glm::max(center.z-low.z,high.z-center.z)));
+            }
+        if(glm::abs(feet-PlayerSupport(center,radius,feet))<.001f)
+        {
+            playerJumping=true;playerJumpTime=0;playerJumpStart=feet;
+        }
+    }
     if(key==GLFW_KEY_R)ResetScene();
     if(key==GLFW_KEY_W)wireframe=!wireframe;
     if(key==GLFW_KEY_T)perspective=!perspective;
