@@ -25,7 +25,7 @@ using namespace std;
 #define WINDOW_HEIGHT 1200
 #define BOX_COUNT 40
 // 저울형 크레인: 조절값은 여기에서 변경합니다.
-#define CRANE_INITIAL_TILT 10.0f
+#define CRANE_INITIAL_TILT 0.0f // 양쪽 팔은 같은 무게: 중심에서 같은 거리이면 수평
 #define CRANE_TILT_PER_STEP 3.0f
 #define CRANE_SLIDE_STEPS 5
 #define CRANE_SLIDE_STEP .10f
@@ -297,6 +297,8 @@ void UpdateCrane(GLFWwindow* window,float dt)
     craneYaw=glm::mod(craneYaw+yawDirection*CRANE_YAW_SPEED*dt,360.0f);
     float spreadTarget=yawDirection!=0 ? CRANE_SPREAD_ANGLE : 0;
     spreadAngle+=glm::clamp(spreadTarget-spreadAngle,-CRANE_SPREAD_SPEED*dt,CRANE_SPREAD_SPEED*dt);
+    // 동일한 무게를 가정하므로 양쪽 이동 단계가 같으면 수평이고,
+    // 한쪽이 중심에 가까워지면 그쪽이 올라가며 반대쪽이 내려갑니다.
     float tiltTarget=CRANE_INITIAL_TILT+(slideStep[1]-slideStep[0])*CRANE_TILT_PER_STEP;
     beamTilt+=glm::clamp(tiltTarget-beamTilt,-CRANE_TILT_SPEED*dt,CRANE_TILT_SPEED*dt);
     for(int i=0;i<2;++i)

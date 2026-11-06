@@ -1,10 +1,11 @@
-﻿<Solution>
+<Solution>
   <Configurations>
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
   <Project Path="1_13_orbit_ortho/1_13_orbit_ortho.vcxproj" Id="4f45b336-976e-4ed5-93c6-858c41cb44af" />
   <Project Path="1_13_orbit_persp/1_13_orbit_persp.vcxproj" Id="c9df624f-1730-431b-bb92-cde942bd472d" />
+  <Project Path="2023182010_kch/2023182010_kch.vcxproj" Id="d0a257b3-93e5-4240-8b82-66a5d897804c" />
   <Project Path="ComG_1/ComG_1.vcxproj" Id="a67f2e6b-40bd-4400-83a2-4a09c66440ef" />
   <Project Path="ComG_1_1/ComG_1_1.vcxproj" Id="9b4da955-5cbb-4788-9be5-6ff3399a5624" />
   <Project Path="ComG_1_10/ComG_1_10.vcxproj" Id="1e1c68aa-0589-4f1a-bcc2-a15aae1df421" />
@@ -21,6 +22,7 @@
   <Project Path="ComG_1_21/ComG_1_21.vcxproj" Id="486207c0-2a27-4734-a94e-8f093cf53def" />
   <Project Path="ComG_1_22/ComG_1_22.vcxproj" Id="7ed22594-c489-49f9-8a70-df4f04ca9349" />
   <Project Path="ComG_1_23/ComG_1_23.vcxproj" Id="8ee024a8-3d83-43fe-91fc-6a970f6d359d" />
+  <Project Path="ComG_1_24/ComG_1_24.vcxproj" Id="f8e496e4-ea9c-4be6-b4b6-4ba79bc79983" />
   <Project Path="ComG_1_3/ComG_1_3.vcxproj" Id="51be136c-97a5-404e-bb3c-0556891593d5" />
   <Project Path="ComG_1_4/ComG_1_4.vcxproj" Id="a6cb4a91-d5f5-4a25-87ff-f28244abb39c" />
   <Project Path="ComG_1_5/ComG_1_5.vcxproj" Id="15c068da-0b14-43b9-b97f-eba6040b3b1f" />
@@ -31,5 +33,4 @@
   <Project Path="ComG_mid_test/ComG_mid_test.vcxproj" Id="000bd112-651a-48a1-9392-99d032937e06" />
   <Project Path="ComG_mid_test1/ComG_mid_test1.vcxproj" Id="b3811144-d0a1-4b67-873a-17c594974e19" />
   <Project Path="ComG_mid_test2/ComG_mid_test2.vcxproj" Id="6bc3e42b-6074-45a9-8e4d-03f3583f6c58" />
-  <Project Path="2023182010_kch/2023182010_kch.vcxproj" Id="d0a257b3-93e5-4240-8b82-66a5d897804c" />
 </Solution>
