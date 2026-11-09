@@ -70,6 +70,22 @@ using namespace std;
 #define TRUCK_HEIGHT (BELT_HEIGHT * 2.75f)
 #define TRUCK_BELT_GAP 0.65f
 #define TRUCK_YAW -90.0f
+#define TRUCK_DRIVE_SPEED 1.5f
+#define TRUCK_STEER_LIMIT 45.0f
+#define TRUCK_STEER_SPEED 65.0f
+#define TRUCK_STEER_RETURN_SPEED 90.0f
+#define TRUCK_PHYSICS_STEP (1.0f / 120.0f)
+#define TRUCK_ARTICULATION_LIMIT 35.0f
+#define TRUCK_JOINT_MOBILITY 0.60f
+#define TRUCK_BOUNDARY_MARGIN 0.02f
+#define TRUCK_VIEW_HEIGHT 6.5f
+#define TRUCK_VIEW_FORWARD 6.0f
+#define TRACTOR_REAR_Z -17.0275f
+#define TRACTOR_FRONT_Z 7.947f
+#define TRUCK_HITCH_Z -16.0f
+#define TRAILER_AXLE_Z -44.731f
+#define FRONT_WHEEL_X 5.5f
+#define FRONT_WHEEL_Y 2.347f
 #define TRUCK_OBJ_FILE "Truck.obj"
 #define TRUCK_MTL_FILE "Truck.mtl"
 // O: 옆면과 지붕을 한 덩어리로 열고 닫는다.
@@ -130,14 +146,22 @@ GLint modelLocation, viewLocation, projectionLocation, colorLocation, eyeLocatio
 int surfaceCount = 0;
 
 // 같은 재질의 삼각형을 한 번에 그리는 구간
-struct TruckPart { int first, count; glm::vec3 color; bool wing; };
+struct TruckPart {
+	int first, count; glm::vec3 color; bool wing; bool tractor; int frontWheel;
+	glm::vec3 minimum{ numeric_limits<float>::max() }, maximum{ numeric_limits<float>::lowest() };
+};
 vector<TruckPart> truckParts;
 GLuint truckVao = 0, truckVbo = 0;
 glm::vec3 truckSize(0), truckCenter(0), sceneOffset(0);
 glm::mat4 truckModel(1);
+glm::mat4 tractorModel(1), initialTruckModel(1);
+glm::vec3 tractorRear(0), trailerRear(0), secondParkingCenter(0);
+float truckScale = 1, tractorYaw = TRUCK_YAW, trailerYaw = TRUCK_YAW, steeringAngle = 0;
 float truckOpenAngle = 0;
 bool truckOpen = false;
 bool firstPerson = false;
+bool truckView = false;
+glm::vec3 truckViewOffset(0, TRUCK_VIEW_HEIGHT, -TRUCK_VIEW_FORWARD);
 int viewBoxNumber = 0;
 enum class CargoState { Belt, WaitingSpawn, Loading, Loaded }; // 벨트 위, 재생성 대기, 적재 이동 중, 적재 완료
 struct BeltCargo { float distance = 0; bool requested = false; CargoState state = CargoState::Belt; };
@@ -157,6 +181,11 @@ bool InitShader();
 bool InitTruck();
 void DrawTruck();
 void UpdateTruckDoor(float dt);
+void ResetTruckMotion();
+void UpdateTruckMotion(GLFWwindow* window, float dt);
+void AdvanceTruckMotion(float throttle, float steeringInput, float dt);
+glm::mat4 TruckPartTransform(const TruckPart& part);
+bool TruckInsideFloor();
 bool BoxViewTransform(int number, glm::mat4& model);
 void ResetCargo();
 void UpdateCargo(float dt);
@@ -237,6 +266,7 @@ int main()
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
 	cout << "v: view | n/N: next/previous box | 1-5: load/respawn | o: truck open/close | b: start/stop | arrows: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
+	cout << "W/S: truck forward/reverse | A/D: front-wheel steering (45 deg max, automatic return) | T: truck 3/4 view" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
@@ -249,9 +279,10 @@ int main()
 		if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)movement -= forward;
 		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)movement -= right;
 		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)movement += right;
-		if (!firstPerson && glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
+		if (!firstPerson && !truckView && glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
 		if (moving)beltDistance = glm::mod(beltDistance + BELT_SPEED * dt, pathLength);
 		UpdateTruckDoor(dt);
+		UpdateTruckMotion(window, dt);
 		UpdateCargo(dt);
 		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
 		DrawScene(); glfwSwapBuffers(window);
@@ -328,11 +359,18 @@ bool InitTruck()
 					bool side = low.x >= TRUCK_SIDE_X && low.y >= TRUCK_SIDE_BOTTOM
 						&& low.z >= TRUCK_PANEL_BACK_Z && high.z <= TRUCK_PANEL_FRONT_Z;
 					bool wing = objectName == "Cube" && (roof || side);
-					if (truckParts.empty() || truckParts.back().color != color || truckParts.back().wing != wing)
-						truckParts.push_back({ (int)vertices.size(), 0, color, wing });
+					bool tractor = objectName != "Cube" && objectName != "Wheels.001"
+						&& objectName != "Cube.001" && objectName != "Cube.002"
+						&& objectName != "Cube.003" && objectName != "Cube.004";
+					int frontWheel = objectName == "Wheels" && low.z > 0 ? (low.x > 0 ? 1 : 0) : -1;
+					if (truckParts.empty() || truckParts.back().color != color || truckParts.back().wing != wing
+						|| truckParts.back().tractor != tractor || truckParts.back().frontWheel != frontWheel)
+						truckParts.push_back({ (int)vertices.size(), 0, color, wing, tractor, frontWheel });
 					for (Vertex vertex : triangle) {
 						if (glm::length(vertex.normal) < .000001f) vertex.normal = normal;
 						vertices.push_back(vertex);
+						truckParts.back().minimum = glm::min(truckParts.back().minimum, vertex.position);
+						truckParts.back().maximum = glm::max(truckParts.back().maximum, vertex.position);
 						minimum = glm::min(minimum, vertex.position);
 						maximum = glm::max(maximum, vertex.position);
 					}
@@ -360,6 +398,10 @@ bool InitTruck()
 		glm::vec3 origin((minimum.x + maximum.x) * .5f, minimum.y, (minimum.z + maximum.z) * .5f);
 		truckModel = glm::translate(glm::mat4(1), truckCenter) * rotation
 			* glm::scale(glm::mat4(1), glm::vec3(scale)) * glm::translate(glm::mat4(1), -origin);
+		truckScale = scale;
+		initialTruckModel = truckModel;
+		secondParkingCenter = glm::vec3(-truckCenter.x, 0, -truckCenter.z);
+		ResetTruckMotion();
 
 		glGenVertexArrays(1, &truckVao); glGenBuffers(1, &truckVbo);
 		glBindVertexArray(truckVao); glBindBuffer(GL_ARRAY_BUFFER, truckVbo);
@@ -406,7 +448,7 @@ glm::mat4 LoadingTransform()
 	// 상자의 정면은 로컬 -Z. 최종적으로 트럭 로컬 +X(열리는 왼쪽 면)를 바라본다.
 	float u = glm::min(t / .55f, 1.0f); u = u * u * (3 - 2 * u);
 	glm::quat from = glm::angleAxis(-glm::half_pi<float>(), glm::vec3(0, 1, 0));
-	glm::quat to = glm::angleAxis(glm::radians(TRUCK_YAW - 90.0f), glm::vec3(0, 1, 0));
+	glm::quat to = glm::angleAxis(glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0));
 	return glm::translate(glm::mat4(1), position) * glm::mat4_cast(glm::slerp(from, to, u));
 }
 
@@ -500,7 +542,7 @@ bool BoxViewTransform(int number, glm::mat4& model)
 		if (it->number == number) {
 			glm::vec3 center = glm::vec3(truckModel * glm::vec4(it->localCenter, 1));
 			model = glm::rotate(glm::translate(glm::mat4(1), center),
-				glm::radians(TRUCK_YAW - 90.0f), glm::vec3(0, 1, 0));
+				glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0));
 			return true;
 		}
 	return false;
@@ -515,7 +557,7 @@ void DrawCargo()
 	for (const StoredCargo& box : storedCargo) {
 		glm::vec3 center = glm::vec3(truckModel * glm::vec4(box.localCenter, 1));
 		DrawNumberedBox(glm::rotate(glm::translate(glm::mat4(1), center),
-			glm::radians(TRUCK_YAW - 90.0f), glm::vec3(0, 1, 0)), box.number);
+			glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0)), box.number);
 	}
 	if (loadingNumber >= 0) DrawNumberedBox(LoadingTransform(), loadingNumber);
 }
@@ -523,9 +565,123 @@ void DrawCargo()
 // 목표 각도까지 일정한 속도로 이동한다. 도중에 O를 누르면 현재 각도에서 방향을 바꾼다.
 void UpdateTruckDoor(float dt)
 {
+	float previousAngle = truckOpenAngle;
 	float target = truckOpen ? TRUCK_OPEN_ANGLE : 0.0f;
 	float step = TRUCK_OPEN_SPEED * dt;
 	truckOpenAngle += glm::clamp(target - truckOpenAngle, -step, step);
+	if (!TruckInsideFloor()) truckOpenAngle = previousAngle;
+}
+
+void ResetTruckMotion()
+{
+	tractorYaw = trailerYaw = TRUCK_YAW;
+	steeringAngle = 0;
+	tractorRear = glm::vec3(initialTruckModel * glm::vec4(0, 0, TRACTOR_REAR_Z, 1));
+	trailerRear = glm::vec3(initialTruckModel * glm::vec4(0, 0, TRAILER_AXLE_Z, 1));
+	tractorModel = truckModel = initialTruckModel;
+}
+
+// 앞 차체는 조향각에 따라 주행하고, 뒤 차축은 연결점까지의 거리를 유지하며 끌려옵니다.
+void AdvanceTruckMotion(float throttle, float steeringInput, float dt)
+{
+	while (dt > .000001f) {
+		float step = glm::min(dt, TRUCK_PHYSICS_STEP);
+		dt -= step;
+		glm::vec3 oldTractorRear = tractorRear, oldTrailerRear = trailerRear;
+		glm::mat4 oldTractorModel = tractorModel, oldTrailerModel = truckModel;
+		float oldTractorYaw = tractorYaw, oldTrailerYaw = trailerYaw, oldSteer = steeringAngle;
+		float target = steeringInput * TRUCK_STEER_LIMIT;
+		float rate = steeringInput == 0 ? TRUCK_STEER_RETURN_SPEED : TRUCK_STEER_SPEED;
+		steeringAngle += glm::clamp(target - steeringAngle, -rate * step, rate * step);
+		float speed = throttle * TRUCK_DRIVE_SPEED;
+		float angle = glm::radians(tractorYaw);
+		float requestedTurn = speed * glm::tan(glm::radians(steeringAngle))
+			/ ((TRACTOR_FRONT_Z - TRACTOR_REAR_Z) * truckScale);
+		float length = (TRUCK_HITCH_Z - TRAILER_AXLE_Z) * truckScale;
+		float hitchOffset = (TRUCK_HITCH_Z - TRACTOR_REAR_Z) * truckScale;
+		float trailerAngle = glm::radians(trailerYaw);
+		float joint = angle - trailerAngle;
+		// 연결부가 뻑뻑할수록 상대 회전은 줄어들고 앞뒤 차체가 함께 도는 성향이 커집니다.
+		// 뒤 차축의 횡방향 속도 0 조건을 유지하면서 앞 차체의 실제 회전율도 함께 계산합니다.
+		auto rates = [&](float relative, float& frontRate, float& backRate) {
+			float denominator = length - hitchOffset * glm::cos(relative);
+			float lockedRate = speed * glm::sin(relative) / denominator;
+			frontRate = lockedRate + TRUCK_JOINT_MOBILITY * (requestedTurn - lockedRate);
+			backRate = (speed * glm::sin(relative) + hitchOffset * frontRate * glm::cos(relative)) / length;
+		};
+		float turn, trailerTurn;
+		rates(joint, turn, trailerTurn);
+		float halfJoint = joint + (turn - trailerTurn) * step * .5f;
+		rates(halfJoint, turn, trailerTurn);
+		float limit = glm::radians(TRUCK_ARTICULATION_LIMIT);
+		float jointRate = glm::clamp(turn - trailerTurn, (-limit - joint) / step, (limit - joint) / step);
+		// 최대 연결각에서는 상대 회전만 멈춥니다. 전후진과 차량 전체의 곡선 주행은 계속됩니다.
+		turn = (speed * glm::sin(halfJoint) + length * jointRate)
+			/ (length - hitchOffset * glm::cos(halfJoint));
+		trailerTurn = turn - jointRate;
+		float middle = angle + turn * step * .5f;
+		tractorRear += glm::vec3(glm::sin(middle), 0, glm::cos(middle)) * speed * step;
+		tractorYaw += glm::degrees(turn * step);
+		tractorModel = glm::translate(glm::mat4(1), tractorRear)
+			* glm::rotate(glm::mat4(1), glm::radians(tractorYaw), glm::vec3(0, 1, 0))
+			* glm::scale(glm::mat4(1), glm::vec3(truckScale))
+			* glm::translate(glm::mat4(1), glm::vec3(0, 0, -TRACTOR_REAR_Z));
+		if (speed != 0) {
+			glm::vec3 hitch = glm::vec3(tractorModel * glm::vec4(0, 0, TRUCK_HITCH_Z, 1));
+			trailerAngle += trailerTurn * step;
+			trailerYaw = glm::degrees(trailerAngle);
+			trailerRear = hitch - glm::vec3(glm::sin(trailerAngle), 0, glm::cos(trailerAngle)) * length;
+			truckModel = glm::translate(glm::mat4(1), hitch)
+				* glm::rotate(glm::mat4(1), glm::radians(trailerYaw), glm::vec3(0, 1, 0))
+				* glm::scale(glm::mat4(1), glm::vec3(truckScale))
+				* glm::translate(glm::mat4(1), glm::vec3(0, 0, -TRUCK_HITCH_Z));
+		}
+		// 바닥 경계만 이동을 막습니다. 연결각 제한은 위의 회전율 계산에서 처리합니다.
+		if (!TruckInsideFloor()) {
+			tractorRear = oldTractorRear; trailerRear = oldTrailerRear;
+			tractorYaw = oldTractorYaw; trailerYaw = oldTrailerYaw;
+			tractorModel = oldTractorModel; truckModel = oldTrailerModel;
+			if (!TruckInsideFloor()) steeringAngle = oldSteer;
+		}
+	}
+}
+
+glm::mat4 TruckPartTransform(const TruckPart& part)
+{
+	glm::mat4 model = part.tractor ? tractorModel : (part.wing ? TruckWingTransform() : truckModel);
+	if (part.frontWheel >= 0) {
+		glm::vec3 pivot(part.frontWheel == 1 ? FRONT_WHEEL_X : -FRONT_WHEEL_X, FRONT_WHEEL_Y, TRACTOR_FRONT_Z);
+		model = model * glm::translate(glm::mat4(1), pivot)
+			* glm::rotate(glm::mat4(1), glm::radians(steeringAngle), glm::vec3(0, 1, 0))
+			* glm::translate(glm::mat4(1), -pivot);
+	}
+	return model;
+}
+
+// 중심점뿐 아니라 각 부품의 회전된 경계 상자 전체를 바닥 안에 유지합니다.
+bool TruckInsideFloor()
+{
+	for (const TruckPart& part : truckParts) {
+		glm::mat4 model = TruckPartTransform(part);
+		for (int corner = 0; corner < 8; ++corner) {
+			glm::vec3 local((corner & 1) ? part.maximum.x : part.minimum.x,
+				(corner & 2) ? part.maximum.y : part.minimum.y,
+				(corner & 4) ? part.maximum.z : part.minimum.z);
+			glm::vec3 world = glm::vec3(model * glm::vec4(local, 1));
+			if (glm::abs(world.x) > FLOOR_WIDTH * .5f - TRUCK_BOUNDARY_MARGIN
+				|| glm::abs(world.z) > FLOOR_DEPTH * .5f - TRUCK_BOUNDARY_MARGIN) return false;
+		}
+	}
+	return true;
+}
+
+void UpdateTruckMotion(GLFWwindow* window, float dt)
+{
+	float throttle = (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS ? 1.0f : 0.0f)
+		- (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ? 1.0f : 0.0f);
+	float steer = (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS ? 1.0f : 0.0f)
+		- (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS ? 1.0f : 0.0f);
+	AdvanceTruckMotion(throttle, steer, dt);
 }
 
 // 지붕 반대쪽 모서리의 길이 방향 축(Z)을 중심으로 옆판과 지붕에 같은 회전을 적용한다.
@@ -541,21 +697,23 @@ glm::mat4 TruckWingTransform()
 void DrawTruck()
 {
 	glm::vec3 parkingSize = truckSize + glm::vec3(PARKING_MARGIN * 2, 0, PARKING_MARGIN * 2);
+	for (glm::vec3 parkingCenter : { truckCenter, secondParkingCenter }) {
 	for (int side = -1; side <= 1; side += 2) {
-		glm::vec3 longLine = truckCenter + glm::vec3(0, PARKING_LINE_HEIGHT * .5f, side * parkingSize.z * .5f);
-		glm::vec3 endLine = truckCenter + glm::vec3(side * parkingSize.x * .5f, PARKING_LINE_HEIGHT * .5f, 0);
+		glm::vec3 longLine = parkingCenter + glm::vec3(0, PARKING_LINE_HEIGHT * .5f, side * parkingSize.z * .5f);
+		glm::vec3 endLine = parkingCenter + glm::vec3(side * parkingSize.x * .5f, PARKING_LINE_HEIGHT * .5f, 0);
 		DrawBox(glm::translate(glm::mat4(1), longLine),
 			glm::vec3(parkingSize.x + PARKING_LINE_WIDTH, PARKING_LINE_HEIGHT, PARKING_LINE_WIDTH), glm::vec3(1));
 		DrawBox(glm::translate(glm::mat4(1), endLine),
 			glm::vec3(PARKING_LINE_WIDTH, PARKING_LINE_HEIGHT, parkingSize.z + PARKING_LINE_WIDTH), glm::vec3(1));
 	}
+	}
 	// 원본 하부 프레임 위에 얇은 적재 바닥을 놓아 내부가 열린 상태에서도 바닥이 보인다.
 	DrawBox(glm::translate(truckModel, glm::vec3(.161608f, 5.40f, -36.30f)),
 		glm::vec3(11.75f, .16f, 41.5f), glm::vec3(.30f));
-	glm::mat4 wingModel = TruckWingTransform();
 	glBindVertexArray(truckVao);
 	for (const TruckPart& part : truckParts) {
-		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(part.wing ? wingModel : truckModel));
+		glm::mat4 model = TruckPartTransform(part);
+		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
 		glUniform3fv(colorLocation, 1, glm::value_ptr(part.color));
 		glDrawArrays(GL_TRIANGLES, part.first, part.count);
 	}
@@ -593,6 +751,14 @@ void DrawScene()
 {
 	glClearColor(.70f, .82f, .94f, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); glUseProgram(programID);
 	glm::vec3 eye = cameraPosition, target = cameraTarget;
+	if (truckView) {
+		glm::vec3 front = glm::vec3(tractorModel * glm::vec4(0, 0, TRACTOR_FRONT_Z, 1));
+		glm::vec3 rear = glm::vec3(truckModel * glm::vec4(0, 0, CARGO_MIN_Z, 1));
+		target = (front + rear) * .5f + glm::vec3(0, TRUCK_HEIGHT * .35f, 0);
+		glm::mat4 heading = glm::rotate(glm::mat4(1), glm::radians(tractorYaw), glm::vec3(0, 1, 0));
+		// 트럭 뒤쪽 위에서 전진 방향을 바라보며, 앞 차체의 방향을 따라갑니다.
+		eye = target + glm::vec3(heading * glm::vec4(truckViewOffset, 0));
+	}
 	if (firstPerson) {
 		glm::mat4 box(1);
 		if (BoxViewTransform(viewBoxNumber, box)) {
@@ -602,7 +768,7 @@ void DrawScene()
 		}
 	}
 	glm::mat4 view = glm::lookAt(eye, target, glm::vec3(0, 1, 0));
-	glm::mat4 projection = (firstPerson || perspective) ? glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR)
+	glm::mat4 projection = (truckView || firstPerson || perspective) ? glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR)
 		: glm::ortho(-viewRange * PERSPECTIVE_ASPECT, viewRange * PERSPECTIVE_ASPECT, -viewRange, viewRange, PERSPECTIVE_NEAR, PERSPECTIVE_FAR);
 	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view)); glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
 	glUniform3fv(eyeLocation, 1, glm::value_ptr(eye));
@@ -649,7 +815,8 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	if (key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_MINUS)ScrollCallback(window, 0, -1);
 	if (action != GLFW_PRESS)return;
 	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
-	if (key == GLFW_KEY_V) { firstPerson = !firstPerson; dragging = false; }
+	if (key == GLFW_KEY_V) { firstPerson = !firstPerson; truckView = false; dragging = false; }
+	if (key == GLFW_KEY_T) { truckView = !truckView; firstPerson = false; dragging = false; }
 	if (key == GLFW_KEY_N) {
 		int direction = (mods & GLFW_MOD_SHIFT) ? -1 : 1;
 		viewBoxNumber = (viewBoxNumber + direction + BOX_COUNT) % BOX_COUNT;
@@ -674,7 +841,9 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	}
 	if (key == GLFW_KEY_P)perspective = (mods & GLFW_MOD_SHIFT) == 0;
 	if (key == GLFW_KEY_R) {
-		firstPerson = false; viewBoxNumber = 0;
+		ResetTruckMotion();
+		firstPerson = false; truckView = false; viewBoxNumber = 0;
+		truckViewOffset = glm::vec3(0, TRUCK_VIEW_HEIGHT, -TRUCK_VIEW_FORWARD);
 		truckOpen = false; truckOpenAngle = 0;
 		ResetCargo();
 		beltDistance = 0; moving = false; perspective = true; dragging = false; viewRange = VIEW_RANGE;
@@ -685,6 +854,11 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 void ScrollCallback(GLFWwindow*, double, double yoffset)
 {
 	if (firstPerson) return;
+	if (truckView) {
+		float radius = glm::clamp(glm::length(truckViewOffset) - (float)yoffset * ZOOM_STEP, CAMERA_RADIUS_MIN, CAMERA_RADIUS_MAX);
+		truckViewOffset = glm::normalize(truckViewOffset) * radius;
+		return;
+	}
 	if (perspective) {
 		glm::vec3 offset = cameraPosition - cameraTarget;
 		float radius = glm::clamp(glm::length(offset) - (float)yoffset * ZOOM_STEP, CAMERA_RADIUS_MIN, CAMERA_RADIUS_MAX);
@@ -704,13 +878,17 @@ void CursorCallback(GLFWwindow* window, double x, double y)
 {
 	if (firstPerson || !dragging)return;
 	int width, height; glfwGetWindowSize(window, &width, &height); if (width <= 0 || height <= 0)return;
-	glm::vec3 offset = cameraPosition - cameraTarget; float radius = glm::length(offset);
+	// 트럭 시점에서는 차량 기준의 orbit 오프셋만 변경하여 주행 중에도 시점을 유지합니다.
+	glm::vec3 offset = truckView ? truckViewOffset : cameraPosition - cameraTarget;
+	float radius = glm::length(offset);
 	float yaw = glm::atan(offset.x, offset.z), pitch = glm::asin(glm::clamp(offset.y / radius, -1.0f, 1.0f));
 	yaw -= glm::radians(ORBIT_DEGREES) * (float)(x - previousMouseX) / width;
 	pitch += glm::radians(ORBIT_DEGREES) * (float)(y - previousMouseY) / height;
 	previousMouseX = x; previousMouseY = y;
 	pitch = glm::clamp(pitch, -glm::radians(ORBIT_PITCH_LIMIT), glm::radians(ORBIT_PITCH_LIMIT));
-	cameraPosition = cameraTarget + radius * glm::vec3(glm::cos(pitch) * glm::sin(yaw), glm::sin(pitch), glm::cos(pitch) * glm::cos(yaw));
+	offset = radius * glm::vec3(glm::cos(pitch) * glm::sin(yaw), glm::sin(pitch), glm::cos(pitch) * glm::cos(yaw));
+	if (truckView) truckViewOffset = offset;
+	else cameraPosition = cameraTarget + offset;
 }
 
 
