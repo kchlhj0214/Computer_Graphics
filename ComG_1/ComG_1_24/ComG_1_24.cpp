@@ -7,16 +7,20 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <map>
+#include <limits>
+#include <stdexcept>
 using namespace std;
 
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
-#define CAMERA_X 4.0f
-#define CAMERA_Y 4.0f
-#define CAMERA_Z 6.0f
-#define CAMERA_TARGET_X 0.15f
-#define CAMERA_TARGET_Y 0.35f
-#define CAMERA_TARGET_Z 0.0f
+// 트럭과 벨트가 시작 화면에 함께 들어오는 시점
+#define CAMERA_X 7.0f
+#define CAMERA_Y 6.0f
+#define CAMERA_Z 9.0f
+#define CAMERA_TARGET_X 0.55f
+#define CAMERA_TARGET_Y 0.50f
+#define CAMERA_TARGET_Z -1.0f
 #define PERSPECTIVE_FOVY 45.0f
 #define PERSPECTIVE_ASPECT ((float)WINDOW_WIDTH / WINDOW_HEIGHT)
 #define PERSPECTIVE_NEAR 0.10f
@@ -24,14 +28,15 @@ using namespace std;
 #define CAMERA_MOVE_SPEED 1.5f
 #define CAMERA_RADIUS_MIN 0.50f
 #define CAMERA_RADIUS_MAX 25.0f
-#define VIEW_RANGE 3.2f
+#define VIEW_RANGE 5.5f
 #define VIEW_RANGE_MIN 0.2f
 #define VIEW_RANGE_MAX 15.0f
 #define ZOOM_STEP 0.05f
 #define ORBIT_DEGREES 720.0f
 #define ORBIT_PITCH_LIMIT 89.0f
-#define FLOOR_WIDTH 6.0f
-#define FLOOR_DEPTH 5.0f
+// 바닥 가로(X), 세로(Z): 직전 크기의 2배
+#define FLOOR_WIDTH (6.0f * 8.0f)
+#define FLOOR_DEPTH (5.0f * 8.0f)
 #define FLOOR_HEIGHT 0.06f
 #define BELT_START_X -1.20f
 #define BELT_START_Z 1.60f
@@ -57,9 +62,26 @@ using namespace std;
 #define MARK_HEIGHT 0.004f
 #define MARK_GAP 0.018f
 #define CEILING_HEIGHT 4.0f
-#define LIGHT_SAMPLES_X 6
-#define LIGHT_SAMPLES_Z 6
-#define DIFFUSE_STRENGTH 1.25f
+// 트럭 양쪽과 벨트 주변까지 넓게 분포하는 천장 조명
+#define CEILING_WIDTH FLOOR_WIDTH
+#define CEILING_DEPTH FLOOR_DEPTH
+// 높이로 크기를 정하며, 길이와 폭은 원본 비율을 유지한다.
+#define TRUCK_HEIGHT (BELT_HEIGHT * 2.75f)
+#define TRUCK_BELT_GAP 0.65f
+#define TRUCK_YAW -90.0f
+#define TRUCK_OBJ_FILE "Truck.obj"
+#define TRUCK_MTL_FILE "Truck.mtl"
+#define PARKING_MARGIN 0.50f
+// 주차선 바깥부터 맵 가장자리까지 확보할 통로 폭
+#define MAP_EDGE_CLEARANCE 3.0f
+// 각 지점에서는 가까운 8x8 조명을 계산해 조명 증가에 따른 부하를 제한한다.
+#define LIGHT_LOCAL_SAMPLES 8
+#define PARKING_LINE_WIDTH 0.08f
+#define PARKING_LINE_HEIGHT 0.006f
+#define LIGHT_SAMPLES_X 48
+#define LIGHT_SAMPLES_Z 40
+// 샘플 수는 평균되므로 밝기는 별도로 조절한다.
+#define DIFFUSE_STRENGTH 2.5f
 #define SPECULAR_STRENGTH 0.30f
 #define SHININESS 32.0f
 
@@ -74,8 +96,17 @@ GLuint programID = 0, vao = 0, vbo = 0;
 GLint modelLocation, viewLocation, projectionLocation, colorLocation, eyeLocation;
 int surfaceCount = 0;
 
+// 같은 재질의 삼각형을 한 번에 그리는 구간
+struct TruckPart { int first, count; glm::vec3 color; };
+vector<TruckPart> truckParts;
+GLuint truckVao = 0, truckVbo = 0;
+glm::vec3 truckSize(0), truckCenter(0), sceneOffset(0);
+glm::mat4 truckModel(1);
+
 string ReadFile(const char* name);
 bool InitShader();
+bool InitTruck();
+void DrawTruck();
 glm::mat4 BeltTransform(float distance);
 void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color);
 void DrawScene();
@@ -89,10 +120,12 @@ int main()
 	if (!glfwInit())return -1;
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE); glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "1-20 Conveyor", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "1-24 Conveyor and Truck", nullptr, nullptr);
 	if (!window) { glfwTerminate(); return -1; }
 	glfwMakeContextCurrent(window); glewExperimental = GL_TRUE;
 	if (glewInit() != GLEW_OK || !InitShader()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
+	if (!InitTruck()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
+	cameraPosition += sceneOffset; cameraTarget += sceneOffset;
 	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
 	glfwSetKeyCallback(window, KeyCallback); glfwSetMouseButtonCallback(window, MouseCallback);
 	glfwSetCursorPosCallback(window, CursorCallback); glfwSetScrollCallback(window, ScrollCallback);
@@ -119,9 +152,10 @@ int main()
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position)); glEnableVertexAttribArray(0);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal)); glEnableVertexAttribArray(1); glBindVertexArray(0);
 	glUseProgram(programID); eyeLocation = glGetUniformLocation(programID, "eyePosition");
-	glUniform2f(glGetUniformLocation(programID, "ceilingSize"), FLOOR_WIDTH, FLOOR_DEPTH);
+	glUniform2f(glGetUniformLocation(programID, "ceilingSize"), CEILING_WIDTH, CEILING_DEPTH);
 	glUniform1f(glGetUniformLocation(programID, "ceilingHeight"), CEILING_HEIGHT);
 	glUniform2i(glGetUniformLocation(programID, "lightSamples"), LIGHT_SAMPLES_X, LIGHT_SAMPLES_Z);
+	glUniform1i(glGetUniformLocation(programID, "localSamples"), LIGHT_LOCAL_SAMPLES);
 	glUniform1f(glGetUniformLocation(programID, "diffuseStrength"), DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
@@ -143,14 +177,143 @@ int main()
 		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
 		DrawScene(); glfwSwapBuffers(window);
 	}
+	glDeleteBuffers(1, &truckVbo); glDeleteVertexArrays(1, &truckVao);
 	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
 	glfwDestroyWindow(window); glfwTerminate(); return 0;
+}
+
+// OBJ의 면/노멀과 MTL의 Kd(기본 색상)를 읽는다.
+// 현재 트럭처럼 이미지 텍스처 없이 단색 재질을 사용하는 모델용이다.
+bool InitTruck()
+{
+	try {
+		ifstream materialFile(TRUCK_MTL_FILE), objectFile(TRUCK_OBJ_FILE);
+		if (!materialFile || !objectFile)
+			throw runtime_error("Cannot open Truck.obj / Truck.mtl");
+
+		map<string, glm::vec3> colors;
+		string line, name;
+		while (getline(materialFile, line)) {
+			istringstream input(line);
+			string type; input >> type;
+			if (type == "newmtl") input >> name;
+			else if (type == "Kd") input >> colors[name].r >> colors[name].g >> colors[name].b;
+		}
+
+		vector<glm::vec3> positions, normals;
+		vector<Vertex> vertices;
+		glm::vec3 color(.8f);
+		glm::vec3 minimum(numeric_limits<float>::max()), maximum(numeric_limits<float>::lowest());
+		while (getline(objectFile, line)) {
+			istringstream input(line);
+			string type; input >> type;
+			if (type == "v" || type == "vn") {
+				glm::vec3 value; input >> value.x >> value.y >> value.z;
+				(type == "v" ? positions : normals).push_back(value);
+			}
+			else if (type == "usemtl") {
+				input >> name;
+				auto found = colors.find(name);
+				if (found == colors.end()) throw runtime_error("Unknown truck material: " + name);
+				color = found->second;
+			}
+			else if (type == "f") {
+				vector<Vertex> face;
+				string token;
+				while (input >> token) {
+					if (token[0] == '#') break;
+					size_t slash = token.find('/');
+					int index = stoi(token.substr(0, slash));
+					int resolved = index > 0 ? index - 1 : (int)positions.size() + index;
+					Vertex vertex{ positions.at(resolved), glm::vec3(0) };
+					size_t last = token.rfind('/');
+					if (slash != string::npos && last != slash && last + 1 < token.size()) {
+						int normal = stoi(token.substr(last + 1));
+						vertex.normal = normals.at(normal > 0 ? normal - 1 : (int)normals.size() + normal);
+					}
+					face.push_back(vertex);
+				}
+				// 내보내기 때 삼각형 변환을 하지 않은 면도 나눠서 저장한다.
+				for (size_t i = 1; i + 1 < face.size(); ++i) {
+					Vertex triangle[] = { face[0], face[i], face[i + 1] };
+					glm::vec3 normal = glm::cross(triangle[1].position - triangle[0].position,
+						triangle[2].position - triangle[0].position);
+					if (glm::length(normal) < .000001f) continue;
+					normal = glm::normalize(normal);
+					if (truckParts.empty() || truckParts.back().color != color)
+						truckParts.push_back({ (int)vertices.size(), 0, color });
+					for (Vertex vertex : triangle) {
+						if (glm::length(vertex.normal) < .000001f) vertex.normal = normal;
+						vertices.push_back(vertex);
+						minimum = glm::min(minimum, vertex.position);
+						maximum = glm::max(maximum, vertex.position);
+					}
+					truckParts.back().count += 3;
+				}
+			}
+		}
+		if (vertices.empty() || maximum.y <= minimum.y)
+			throw runtime_error("Truck mesh is empty or has no height");
+
+		// 면에 실제로 사용되는 정점만으로 크기를 구해 고립 정점은 제외한다.
+		float scale = TRUCK_HEIGHT / (maximum.y - minimum.y);
+		glm::vec3 size = (maximum - minimum) * scale;
+		glm::mat4 rotation = glm::rotate(glm::mat4(1), glm::radians(TRUCK_YAW), glm::vec3(0, 1, 0));
+		truckSize = glm::abs(glm::vec3(rotation[0])) * size.x
+			+ glm::abs(glm::vec3(rotation[1])) * size.y + glm::abs(glm::vec3(rotation[2])) * size.z;
+		float lastStartX = BELT_START_X + BELT_CORNER_RADIUS;
+		float lastZ = BELT_START_Z - BELT_FIRST_LENGTH - BELT_CORNER_RADIUS;
+		truckCenter = glm::vec3(lastStartX + BELT_SECOND_LENGTH * .5f, 0,
+			lastZ - BELT_WIDTH * .5f - RAIL_WIDTH - TRUCK_BELT_GAP - truckSize.z * .5f);
+		// 트럭이 -Z 가장자리 쪽, 벨트가 맵 안쪽에 오도록 함께 평행 이동한다.
+		float parkingBack = truckCenter.z - truckSize.z * .5f - PARKING_MARGIN - PARKING_LINE_WIDTH * .5f;
+		sceneOffset.z = -FLOOR_DEPTH * .5f + MAP_EDGE_CLEARANCE - parkingBack;
+		truckCenter += sceneOffset;
+		glm::vec3 origin((minimum.x + maximum.x) * .5f, minimum.y, (minimum.z + maximum.z) * .5f);
+		truckModel = glm::translate(glm::mat4(1), truckCenter) * rotation
+			* glm::scale(glm::mat4(1), glm::vec3(scale)) * glm::translate(glm::mat4(1), -origin);
+
+		glGenVertexArrays(1, &truckVao); glGenBuffers(1, &truckVbo);
+		glBindVertexArray(truckVao); glBindBuffer(GL_ARRAY_BUFFER, truckVbo);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
+		glEnableVertexAttribArray(1); glBindVertexArray(0);
+		cout << "Truck size: " << truckSize.x << ", " << truckSize.y << ", " << truckSize.z << endl;
+		return true;
+	}
+	catch (const exception& error) {
+		cerr << error.what() << endl;
+		return false;
+	}
+}
+
+// 바퀴 최하단은 Y=0에 놓고 주차선은 바닥보다 살짝 높여 겹침을 방지한다.
+void DrawTruck()
+{
+	glm::vec3 parkingSize = truckSize + glm::vec3(PARKING_MARGIN * 2, 0, PARKING_MARGIN * 2);
+	for (int side = -1; side <= 1; side += 2) {
+		glm::vec3 longLine = truckCenter + glm::vec3(0, PARKING_LINE_HEIGHT * .5f, side * parkingSize.z * .5f);
+		glm::vec3 endLine = truckCenter + glm::vec3(side * parkingSize.x * .5f, PARKING_LINE_HEIGHT * .5f, 0);
+		DrawBox(glm::translate(glm::mat4(1), longLine),
+			glm::vec3(parkingSize.x + PARKING_LINE_WIDTH, PARKING_LINE_HEIGHT, PARKING_LINE_WIDTH), glm::vec3(1));
+		DrawBox(glm::translate(glm::mat4(1), endLine),
+			glm::vec3(PARKING_LINE_WIDTH, PARKING_LINE_HEIGHT, parkingSize.z + PARKING_LINE_WIDTH), glm::vec3(1));
+	}
+	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(truckModel));
+	glBindVertexArray(truckVao);
+	for (const TruckPart& part : truckParts) {
+		glUniform3fv(colorLocation, 1, glm::value_ptr(part.color));
+		glDrawArrays(GL_TRIANGLES, part.first, part.count);
+	}
+	glBindVertexArray(0);
 }
 
 glm::mat4 BeltTransform(float distance)
 {
 	float arcLength = BELT_CORNER_RADIUS * glm::half_pi<float>();
-	glm::vec3 position(BELT_START_X, BELT_HEIGHT, BELT_START_Z);
+	glm::vec3 position = glm::vec3(BELT_START_X, BELT_HEIGHT, BELT_START_Z) + sceneOffset;
 	float angle = 0;
 	if (distance <= BELT_FIRST_LENGTH)position.z -= distance;
 	else if (distance < BELT_FIRST_LENGTH + arcLength) {
@@ -183,6 +346,7 @@ void DrawScene()
 	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view)); glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
 	glUniform3fv(eyeLocation, 1, glm::value_ptr(cameraPosition));
 	DrawBox(glm::translate(glm::mat4(1), glm::vec3(0, -FLOOR_HEIGHT * .5f, 0)), glm::vec3(FLOOR_WIDTH, FLOOR_HEIGHT, FLOOR_DEPTH), glm::vec3(.32f, .34f, .32f));
+	DrawTruck();
 	glm::mat4 identity(1); glm::vec3 beltColor(.22f, .24f, .27f);
 	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(identity)); glUniform3fv(colorLocation, 1, glm::value_ptr(beltColor));
 	glBindVertexArray(vao); glDrawArrays(GL_TRIANGLES, 36, surfaceCount); glBindVertexArray(0);
@@ -228,7 +392,7 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	if (key == GLFW_KEY_P)perspective = (mods & GLFW_MOD_SHIFT) == 0;
 	if (key == GLFW_KEY_R) {
 		beltDistance = 0; moving = false; perspective = true; dragging = false; viewRange = VIEW_RANGE;
-		cameraPosition = glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z); cameraTarget = glm::vec3(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
+		cameraPosition = glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z) + sceneOffset; cameraTarget = glm::vec3(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z) + sceneOffset;
 	}
 }
 
