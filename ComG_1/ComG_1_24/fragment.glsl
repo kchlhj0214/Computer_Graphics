@@ -10,6 +10,12 @@ uniform int localSamples;
 uniform float diffuseStrength;
 uniform float specularStrength;
 uniform float shininess;
+uniform vec3 cargoLights[3];
+uniform float cargoLightStrength;
+uniform float cargoLightAttenuation;
+uniform mat4 worldToTruck;
+uniform vec3 cargoLightMin;
+uniform vec3 cargoLightMax;
 out vec4 FragColor;
 void main(void)
 {
@@ -32,5 +38,19 @@ void main(void)
             result+=emissionDirection*(diffuseStrength*diffuse*uColor+specularStrength*specular*vec3(1.0));
         }
     }
-    FragColor=vec4(result/float(count.x*count.y),1.0);
+    result/=float(count.x*count.y);
+    // 짐칸 내부에만 점조명을 적용한다. 바깥 바닥·벨트·차체에는 천장 조명만 적용된다.
+    vec3 truckPosition=(worldToTruck*vec4(worldPosition,1.0)).xyz;
+    bool insideCargo=all(greaterThanEqual(truckPosition,cargoLightMin))
+        && all(lessThanEqual(truckPosition,cargoLightMax));
+    for(int i=0;i<3 && insideCargo;++i) {
+        vec3 delta=cargoLights[i]-worldPosition;
+        float distanceSquared=max(dot(delta,delta),0.0001);
+        vec3 L=delta*inversesqrt(distanceSquared);
+        float diffuse=max(dot(N,L),0.0);
+        float specular=diffuse>0.0 ? pow(max(dot(reflect(-L,N),V),0.0),shininess) : 0.0;
+        result+=cargoLightStrength/(1.0+cargoLightAttenuation*distanceSquared)
+            *(diffuse*uColor+specularStrength*specular*vec3(1.0));
+    }
+    FragColor=vec4(result,1.0);
 }
