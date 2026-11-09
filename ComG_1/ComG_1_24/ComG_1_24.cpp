@@ -15,6 +15,11 @@ using namespace std;
 
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 1200
+#define SIMULATION_FPS 120
+#define TIME_SCALE_INITIAL 1.0f
+#define TIME_SCALE_MIN 0.10f
+#define TIME_SCALE_MAX 4.0f
+#define TIME_SCALE_STEP 0.10f
 // 트럭과 벨트가 시작 화면에 함께 들어오는 시점
 #define CAMERA_X 7.0f
 #define CAMERA_Y 6.0f
@@ -116,6 +121,8 @@ using namespace std;
 #define BOX_EYE_HEIGHT (BOX_SIZE * .25f)
 #define BOX_EYE_FORWARD (BOX_SIZE * .5f + .015f)
 #define CARGO_MOVE_SECONDS 2.4f
+#define UNLOAD_MOVE_SECONDS 2.4f
+#define UNLOAD_GROUND_GAP 0.15f
 #define CARGO_GAP 0.025f
 #define CARGO_BELT_GAP 0.06f
 #define CARGO_LIGHT_STRENGTH 1.8f
@@ -138,6 +145,8 @@ struct Vertex { glm::vec3 position, normal; };
 glm::vec3 boxColors[BOX_COUNT] = { {.9f,.1f,.1f},{.9f,.45f,.1f},{.9f,.9f,.1f},{.1f,.8f,.1f},{.1f,.25f,.9f} };
 glm::vec3 cameraPosition(CAMERA_X, CAMERA_Y, CAMERA_Z), cameraTarget(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z);
 float beltDistance = 0, viewRange = VIEW_RANGE;
+float timeScale = TIME_SCALE_INITIAL;
+double simulationAccumulator = 0;
 float pathLength = BELT_FIRST_LENGTH + BELT_CORNER_RADIUS * glm::half_pi<float>() + BELT_SECOND_LENGTH;
 bool moving = false, perspective = true, dragging = false;
 double previousMouseX = 0, previousMouseY = 0;
@@ -163,11 +172,16 @@ bool firstPerson = false;
 bool truckView = false;
 glm::vec3 truckViewOffset(0, TRUCK_VIEW_HEIGHT, -TRUCK_VIEW_FORWARD);
 int viewBoxNumber = 0;
-enum class CargoState { Belt, WaitingSpawn, Loading, Loaded }; // 벨트 위, 재생성 대기, 적재 이동 중, 적재 완료
+enum class CargoState { Belt, AwaitRespawnKey, WaitingSpawn, Loading }; // 벨트 위, 재생성 키 대기, 재생성 예약, 적재 이동 중
 struct BeltCargo { float distance = 0; bool requested = false; CargoState state = CargoState::Belt; };
 struct StoredCargo { int number; glm::vec3 localCenter; };
 BeltCargo beltCargo[BOX_COUNT];
 vector<StoredCargo> storedCargo;
+struct GroundCargo { int number; glm::vec3 center; };
+vector<GroundCargo> groundCargo;
+vector<glm::vec3> unloadTargets;
+bool unloading = false;
+float unloadProgress = 0;
 vector<glm::vec3> cargoSlots;
 int loadingNumber = -1;
 float loadingProgress = 0;
@@ -186,6 +200,9 @@ void UpdateTruckMotion(GLFWwindow* window, float dt);
 void AdvanceTruckMotion(float throttle, float steeringInput, float dt);
 glm::mat4 TruckPartTransform(const TruckPart& part);
 bool TruckInsideFloor();
+bool TruckInsideParking(glm::vec3 center);
+glm::mat4 UnloadingTransform(int index);
+void StartUnloading();
 bool BoxViewTransform(int number, glm::mat4& model);
 void ResetCargo();
 void UpdateCargo(float dt);
@@ -265,11 +282,12 @@ int main()
 	glUniform1f(glGetUniformLocation(programID, "diffuseStrength"), DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
-	cout << "v: view | n/N: next/previous box | 1-5: load/respawn | o: truck open/close | b: start/stop | arrows: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
+	cout << "v: view | n/N: next/previous box | 1-5: load at belt parking | U: unload all at opposite parking | o: truck open/close | b: start/stop | arrows: camera | drag: orbit | wheel: zoom | +/-: simulation speed | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
 	cout << "W/S: truck forward/reverse | A/D: front-wheel steering (45 deg max, automatic return) | T: truck 3/4 view" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
-		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
+		glfwPollEvents(); double now = glfwGetTime();
+		float dt = (float)glm::min(now - previousTime, 0.1) * timeScale; previousTime = now;
 		glm::vec3 movement(0);
 		glm::vec3 forward = cameraTarget - cameraPosition;
 		forward.y = 0;
@@ -280,10 +298,16 @@ int main()
 		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)movement -= right;
 		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)movement += right;
 		if (!firstPerson && !truckView && glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
-		if (moving)beltDistance = glm::mod(beltDistance + BELT_SPEED * dt, pathLength);
-		UpdateTruckDoor(dt);
-		UpdateTruckMotion(window, dt);
-		UpdateCargo(dt);
+		// 렌더링과 독립된 고정 틱을 사용해 배속을 바꿔도 충돌과 재생성 타이밍을 유지합니다.
+		simulationAccumulator += dt;
+		const float tick = 1.0f / SIMULATION_FPS;
+		while (simulationAccumulator >= tick) {
+			simulationAccumulator -= tick;
+			if (moving)beltDistance = glm::mod(beltDistance + BELT_SPEED * tick, pathLength);
+			UpdateTruckDoor(tick);
+			UpdateTruckMotion(window, tick);
+			UpdateCargo(tick);
+		}
 		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
 		DrawScene(); glfwSwapBuffers(window);
 	}
@@ -423,6 +447,7 @@ bool InitTruck()
 void ResetCargo()
 {
 	storedCargo.clear();
+	groundCargo.clear(); unloadTargets.clear(); unloading = false; unloadProgress = 0;
 	loadingNumber = -1; loadingProgress = 0; closeAfterLoading = false;
 	for (int i = 0; i < BOX_COUNT; ++i)
 		beltCargo[i] = { pathLength * i / BOX_COUNT, false, CargoState::Belt };
@@ -454,12 +479,26 @@ glm::mat4 LoadingTransform()
 
 void UpdateCargo(float dt)
 {
+	if (unloading) {
+		unloadProgress = glm::min(unloadProgress + dt / UNLOAD_MOVE_SECONDS, 1.0f);
+		if (unloadProgress >= 1) {
+			for (size_t i = 0; i < storedCargo.size(); ++i) {
+				groundCargo.push_back({ storedCargo[i].number, unloadTargets[i] });
+			}
+			storedCargo.clear(); unloadTargets.clear(); unloading = false;
+			if (closeAfterLoading) { truckOpen = false; closeAfterLoading = false; }
+		}
+	}
+	bool loadingParked = TruckInsideParking(truckCenter);
+	if (!loadingParked)
+		for (auto& box : beltCargo) box.requested = false;
 	// 이미 벨트를 떠난 상자는 이송을 마친다. 벨트 정지는 새로운 적재 시작만 막는다.
 	if (loadingNumber >= 0) {
 		loadingProgress = glm::min(loadingProgress + dt / CARGO_MOVE_SECONDS, 1.0f);
 		if (loadingProgress >= 1) {
 			storedCargo.push_back({ loadingNumber, cargoSlots[storedCargo.size()] });
-			beltCargo[loadingNumber].state = CargoState::Loaded;
+			// 적재 개체는 유지하고, 같은 번호의 숫자키를 다시 누를 때까지 재생성을 기다립니다.
+			beltCargo[loadingNumber].state = CargoState::AwaitRespawnKey;
 			beltCargo[loadingNumber].requested = false;
 			loadingNumber = -1;
 			if (closeAfterLoading) { truckOpen = false; closeAfterLoading = false; }
@@ -479,7 +518,7 @@ void UpdateCargo(float dt)
 		box.distance = glm::min(box.distance + BELT_SPEED * dt, limit);
 		if (box.distance >= pathLength - .0001f) {
 			if (box.requested) {
-				if (loadingNumber < 0 && truckOpen && !closeAfterLoading
+				if (loadingParked && !unloading && loadingNumber < 0 && truckOpen && !closeAfterLoading
 					&& truckOpenAngle >= TRUCK_OPEN_ANGLE - .001f && storedCargo.size() < cargoSlots.size()) {
 					loadingNumber = number; loadingProgress = 0; box.state = CargoState::Loading;
 					loadingStart = glm::vec3(BeltTransform(pathLength) * glm::vec4(0, STRIPE_HEIGHT + BOX_SIZE * .5f, 0, 1));
@@ -538,6 +577,9 @@ bool BoxViewTransform(int number, glm::mat4& model)
 		model = LoadingTransform();
 		return true;
 	}
+	if (unloading)
+		for (size_t i = 0; i < storedCargo.size(); ++i)
+			if (storedCargo[i].number == number) { model = UnloadingTransform((int)i); return true; }
 	for (auto it = storedCargo.rbegin(); it != storedCargo.rend(); ++it)
 		if (it->number == number) {
 			glm::vec3 center = glm::vec3(truckModel * glm::vec4(it->localCenter, 1));
@@ -545,6 +587,8 @@ bool BoxViewTransform(int number, glm::mat4& model)
 				glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0));
 			return true;
 		}
+	for (auto it = groundCargo.rbegin(); it != groundCargo.rend(); ++it)
+		if (it->number == number) { model = glm::translate(glm::mat4(1), it->center); return true; }
 	return false;
 }
 
@@ -554,12 +598,79 @@ void DrawCargo()
 		if (beltCargo[i].state == CargoState::Belt)
 			DrawNumberedBox(glm::translate(BeltTransform(beltCargo[i].distance),
 				glm::vec3(0, STRIPE_HEIGHT + BOX_SIZE * .5f, 0)), i);
-	for (const StoredCargo& box : storedCargo) {
+	if (!unloading) for (const StoredCargo& box : storedCargo) {
 		glm::vec3 center = glm::vec3(truckModel * glm::vec4(box.localCenter, 1));
 		DrawNumberedBox(glm::rotate(glm::translate(glm::mat4(1), center),
 			glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0)), box.number);
 	}
 	if (loadingNumber >= 0) DrawNumberedBox(LoadingTransform(), loadingNumber);
+	if (unloading)
+		for (size_t i = 0; i < storedCargo.size(); ++i)
+			DrawNumberedBox(UnloadingTransform((int)i), storedCargo[i].number);
+	for (const GroundCargo& box : groundCargo)
+		DrawNumberedBox(glm::translate(glm::mat4(1), box.center), box.number);
+}
+
+// 주차각을 비교하지 않고, 앞뒤 차체와 조향된 바퀴 전체가 주차선 안쪽에 있는지 확인합니다.
+// 열린 지붕과 옆판은 차체의 닫힌 위치로 검사해 문을 열어도 주차 판정은 유지합니다.
+bool TruckInsideParking(glm::vec3 center)
+{
+	glm::vec3 half = truckSize * .5f + glm::vec3(PARKING_MARGIN - PARKING_LINE_WIDTH * .5f, 0,
+		PARKING_MARGIN - PARKING_LINE_WIDTH * .5f);
+	for (const TruckPart& part : truckParts) {
+		glm::mat4 model = part.wing ? truckModel : TruckPartTransform(part);
+		for (int corner = 0; corner < 8; ++corner) {
+			glm::vec3 local((corner & 1) ? part.maximum.x : part.minimum.x,
+				(corner & 2) ? part.maximum.y : part.minimum.y,
+				(corner & 4) ? part.maximum.z : part.minimum.z);
+			glm::vec3 delta = glm::vec3(model * glm::vec4(local, 1)) - center;
+			if (glm::abs(delta.x) > half.x || glm::abs(delta.z) > half.z) return false;
+		}
+	}
+	return !truckParts.empty();
+}
+
+void StartUnloading()
+{
+	if (unloading || loadingNumber >= 0 || storedCargo.empty() || !TruckInsideParking(secondParkingCenter)
+		|| !truckOpen || closeAfterLoading || truckOpenAngle < TRUCK_OPEN_ANGLE - .001f) return;
+	unloadTargets.clear();
+	float pitch = BOX_SIZE + UNLOAD_GROUND_GAP;
+	float parkingWidth = truckSize.x + PARKING_MARGIN * 2;
+	int columns = glm::max(1, (int)((parkingWidth - BOX_SIZE) / pitch));
+	// 반대 주차장의 컨베이어 방향인 -Z 면 바깥에 하역한 짐을 나란히 둡니다.
+	for (size_t i = 0; i < storedCargo.size(); ++i) {
+		size_t slot = groundCargo.size() + i;
+		unloadTargets.push_back(glm::vec3(secondParkingCenter.x - parkingWidth * .5f + BOX_SIZE
+			+ (slot % columns) * pitch, BOX_SIZE * .5f,
+			secondParkingCenter.z - truckSize.z * .5f - PARKING_MARGIN - BOX_SIZE * .5f
+			- UNLOAD_GROUND_GAP - (slot / columns) * pitch));
+	}
+	unloading = true; unloadProgress = 0;
+}
+
+glm::mat4 UnloadingTransform(int index)
+{
+	glm::vec3 local = storedCargo[index].localCenter;
+	glm::vec3 start = glm::vec3(truckModel * glm::vec4(local, 1));
+	glm::vec3 exit = glm::vec3(truckModel * glm::vec4(8.2f, local.y, local.z, 1));
+	glm::vec3 raised = unloadTargets[index]; raised.y = TRUCK_HEIGHT + BOX_SIZE;
+	float t = unloadProgress;
+	glm::vec3 position;
+	if (t < .35f) {
+		float u = t / .35f; u = u * u * (3 - 2 * u);
+		position = glm::mix(start, exit, u);
+	}
+	else if (t < .75f) {
+		float u = (t - .35f) / .40f; u = u * u * (3 - 2 * u);
+		position = glm::mix(exit, raised, u);
+	}
+	else {
+		float u = (t - .75f) / .25f; u = u * u * (3 - 2 * u);
+		position = glm::mix(raised, unloadTargets[index], u);
+	}
+	glm::quat from = glm::angleAxis(glm::radians(trailerYaw - 90.0f), glm::vec3(0, 1, 0));
+	return glm::translate(glm::mat4(1), position) * glm::mat4_cast(glm::slerp(from, glm::quat(1, 0, 0, 0), t));
 }
 
 // 목표 각도까지 일정한 속도로 이동한다. 도중에 O를 누르면 현재 각도에서 방향을 바꾼다.
@@ -681,6 +792,8 @@ void UpdateTruckMotion(GLFWwindow* window, float dt)
 		- (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS ? 1.0f : 0.0f);
 	float steer = (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS ? 1.0f : 0.0f)
 		- (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS ? 1.0f : 0.0f);
+	// 이송 중에는 완전 주차 상태를 유지합니다.
+	if (loadingNumber >= 0 || unloading) return;
 	AdvanceTruckMotion(throttle, steer, dt);
 }
 
@@ -811,8 +924,14 @@ void DrawScene()
 void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 {
 	if (action != GLFW_PRESS && action != GLFW_REPEAT)return;
-	if (key == GLFW_KEY_KP_ADD || key == GLFW_KEY_EQUAL)ScrollCallback(window, 0, 1);
-	if (key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_MINUS)ScrollCallback(window, 0, -1);
+	if (key == GLFW_KEY_KP_ADD || key == GLFW_KEY_EQUAL) {
+		timeScale = glm::clamp(timeScale + TIME_SCALE_STEP, TIME_SCALE_MIN, TIME_SCALE_MAX);
+		cout << "Simulation speed: " << timeScale << "x" << endl;
+	}
+	if (key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_MINUS) {
+		timeScale = glm::clamp(timeScale - TIME_SCALE_STEP, TIME_SCALE_MIN, TIME_SCALE_MAX);
+		cout << "Simulation speed: " << timeScale << "x" << endl;
+	}
 	if (action != GLFW_PRESS)return;
 	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
 	if (key == GLFW_KEY_V) { firstPerson = !firstPerson; truckView = false; dragging = false; }
@@ -824,23 +943,26 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	}
 	if (key == GLFW_KEY_B)moving = !moving;
 	if (key == GLFW_KEY_O) {
-		if (loadingNumber >= 0) closeAfterLoading = !closeAfterLoading;
+		if (loadingNumber >= 0 || unloading) closeAfterLoading = !closeAfterLoading;
 		else truckOpen = !truckOpen;
 	}
+	if (key == GLFW_KEY_U) StartUnloading();
 	if (key >= GLFW_KEY_1 && key <= GLFW_KEY_5) {
 		int number = key - GLFW_KEY_1;
 		BeltCargo& box = beltCargo[number];
-		if (box.state == CargoState::Loaded) {
+		if (box.state == CargoState::AwaitRespawnKey) {
 			box.state = CargoState::WaitingSpawn;
 			box.requested = false;
 		}
-		else if (box.state == CargoState::Belt && truckOpen && truckOpenAngle > .01f && !closeAfterLoading) {
+		else if (box.state == CargoState::Belt && TruckInsideParking(truckCenter) && !unloading
+			&& truckOpen && truckOpenAngle > .01f && !closeAfterLoading) {
 			// 대기 중 같은 번호를 반복 입력해도 중복 등록하지 않는다.
 			box.requested = true;
 		}
 	}
 	if (key == GLFW_KEY_P)perspective = (mods & GLFW_MOD_SHIFT) == 0;
 	if (key == GLFW_KEY_R) {
+		timeScale = TIME_SCALE_INITIAL; simulationAccumulator = 0;
 		ResetTruckMotion();
 		firstPerson = false; truckView = false; viewBoxNumber = 0;
 		truckViewOffset = glm::vec3(0, TRUCK_VIEW_HEIGHT, -TRUCK_VIEW_FORWARD);
