@@ -97,6 +97,8 @@ using namespace std;
 #define DIFFUSE_STRENGTH 2.5f
 #define SPECULAR_STRENGTH 0.30f
 #define SHININESS 32.0f
+#define BOX_EYE_HEIGHT (BOX_SIZE * .25f)
+#define BOX_EYE_FORWARD (BOX_SIZE * .5f + .015f)
 #define CARGO_MOVE_SECONDS 2.4f
 #define CARGO_GAP 0.025f
 #define CARGO_BELT_GAP 0.06f
@@ -135,6 +137,8 @@ glm::vec3 truckSize(0), truckCenter(0), sceneOffset(0);
 glm::mat4 truckModel(1);
 float truckOpenAngle = 0;
 bool truckOpen = false;
+bool firstPerson = false;
+int viewBoxNumber = 0;
 enum class CargoState { Belt, WaitingSpawn, Loading, Loaded }; // 벨트 위, 재생성 대기, 적재 이동 중, 적재 완료
 struct BeltCargo { float distance = 0; bool requested = false; CargoState state = CargoState::Belt; };
 struct StoredCargo { int number; glm::vec3 localCenter; };
@@ -153,6 +157,7 @@ bool InitShader();
 bool InitTruck();
 void DrawTruck();
 void UpdateTruckDoor(float dt);
+bool BoxViewTransform(int number, glm::mat4& model);
 void ResetCargo();
 void UpdateCargo(float dt);
 void DrawCargo();
@@ -231,7 +236,7 @@ int main()
 	glUniform1f(glGetUniformLocation(programID, "diffuseStrength"), DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
-	cout << "1-5: load/respawn | o: truck open/close | b: start/stop | WASD: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
+	cout << "v: view | n/N: next/previous box | 1-5: load/respawn | o: truck open/close | b: start/stop | arrows: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
@@ -240,11 +245,11 @@ int main()
 		forward.y = 0;
 		if (glm::length(forward) > 0)forward = glm::normalize(forward);
 		glm::vec3 right = glm::cross(forward, glm::vec3(0, 1, 0));
-		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)movement += forward;
-		if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)movement -= forward;
-		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)movement -= right;
-		if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)movement += right;
-		if (glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
+		if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)movement += forward;
+		if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)movement -= forward;
+		if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)movement -= right;
+		if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)movement += right;
+		if (!firstPerson && glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
 		if (moving)beltDistance = glm::mod(beltDistance + BELT_SPEED * dt, pathLength);
 		UpdateTruckDoor(dt);
 		UpdateCargo(dt);
@@ -478,6 +483,29 @@ void DrawNumberedBox(const glm::mat4& model, int number)
 		glm::vec3(MARK_LENGTH, MARK_WIDTH, MARK_HEIGHT), glm::vec3(.10f));
 }
 
+// 벨트 위 또는 이송 중인 상자는 같은 번호의 적재된 상자보다 최근에 생성된 개체이다.
+// 재생성 대기 중에는 아직 새 개체가 없으므로 가장 최근 적재 개체를 따라간다.
+bool BoxViewTransform(int number, glm::mat4& model)
+{
+	if (beltCargo[number].state == CargoState::Belt) {
+		model = glm::translate(BeltTransform(beltCargo[number].distance),
+			glm::vec3(0, STRIPE_HEIGHT + BOX_SIZE * .5f, 0));
+		return true;
+	}
+	if (loadingNumber == number) {
+		model = LoadingTransform();
+		return true;
+	}
+	for (auto it = storedCargo.rbegin(); it != storedCargo.rend(); ++it)
+		if (it->number == number) {
+			glm::vec3 center = glm::vec3(truckModel * glm::vec4(it->localCenter, 1));
+			model = glm::rotate(glm::translate(glm::mat4(1), center),
+				glm::radians(TRUCK_YAW - 90.0f), glm::vec3(0, 1, 0));
+			return true;
+		}
+	return false;
+}
+
 void DrawCargo()
 {
 	for (int i = 0; i < BOX_COUNT; ++i)
@@ -564,11 +592,20 @@ void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color)
 void DrawScene()
 {
 	glClearColor(.70f, .82f, .94f, 1); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); glUseProgram(programID);
-	glm::mat4 view = glm::lookAt(cameraPosition, cameraTarget, glm::vec3(0, 1, 0));
-	glm::mat4 projection = perspective ? glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR)
+	glm::vec3 eye = cameraPosition, target = cameraTarget;
+	if (firstPerson) {
+		glm::mat4 box(1);
+		if (BoxViewTransform(viewBoxNumber, box)) {
+			eye = glm::vec3(box * glm::vec4(0, BOX_EYE_HEIGHT, -BOX_EYE_FORWARD, 1));
+			glm::vec3 forward = glm::normalize(glm::vec3(box * glm::vec4(0, 0, -1, 0)));
+			target = eye + forward;
+		}
+	}
+	glm::mat4 view = glm::lookAt(eye, target, glm::vec3(0, 1, 0));
+	glm::mat4 projection = (firstPerson || perspective) ? glm::perspective(glm::radians(PERSPECTIVE_FOVY), PERSPECTIVE_ASPECT, PERSPECTIVE_NEAR, PERSPECTIVE_FAR)
 		: glm::ortho(-viewRange * PERSPECTIVE_ASPECT, viewRange * PERSPECTIVE_ASPECT, -viewRange, viewRange, PERSPECTIVE_NEAR, PERSPECTIVE_FAR);
 	glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view)); glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
-	glUniform3fv(eyeLocation, 1, glm::value_ptr(cameraPosition));
+	glUniform3fv(eyeLocation, 1, glm::value_ptr(eye));
 	glm::vec3 cargoLights[3];
 	for (int i = 0; i < 3; ++i)
 		cargoLights[i] = glm::vec3(TruckWingTransform() * glm::vec4(.16f, 16.15f,
@@ -612,6 +649,12 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	if (key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_MINUS)ScrollCallback(window, 0, -1);
 	if (action != GLFW_PRESS)return;
 	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
+	if (key == GLFW_KEY_V) { firstPerson = !firstPerson; dragging = false; }
+	if (key == GLFW_KEY_N) {
+		int direction = (mods & GLFW_MOD_SHIFT) ? -1 : 1;
+		viewBoxNumber = (viewBoxNumber + direction + BOX_COUNT) % BOX_COUNT;
+		cout << "View box: " << viewBoxNumber + 1 << endl;
+	}
 	if (key == GLFW_KEY_B)moving = !moving;
 	if (key == GLFW_KEY_O) {
 		if (loadingNumber >= 0) closeAfterLoading = !closeAfterLoading;
@@ -631,6 +674,7 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	}
 	if (key == GLFW_KEY_P)perspective = (mods & GLFW_MOD_SHIFT) == 0;
 	if (key == GLFW_KEY_R) {
+		firstPerson = false; viewBoxNumber = 0;
 		truckOpen = false; truckOpenAngle = 0;
 		ResetCargo();
 		beltDistance = 0; moving = false; perspective = true; dragging = false; viewRange = VIEW_RANGE;
@@ -640,6 +684,7 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 
 void ScrollCallback(GLFWwindow*, double, double yoffset)
 {
+	if (firstPerson) return;
 	if (perspective) {
 		glm::vec3 offset = cameraPosition - cameraTarget;
 		float radius = glm::clamp(glm::length(offset) - (float)yoffset * ZOOM_STEP, CAMERA_RADIUS_MIN, CAMERA_RADIUS_MAX);
@@ -650,14 +695,14 @@ void ScrollCallback(GLFWwindow*, double, double yoffset)
 
 void MouseCallback(GLFWwindow* window, int button, int action, int)
 {
-	if (button != GLFW_MOUSE_BUTTON_LEFT)return;
+	if (firstPerson || button != GLFW_MOUSE_BUTTON_LEFT)return;
 	dragging = action == GLFW_PRESS;
 	if (dragging)glfwGetCursorPos(window, &previousMouseX, &previousMouseY);
 }
 
 void CursorCallback(GLFWwindow* window, double x, double y)
 {
-	if (!dragging)return;
+	if (firstPerson || !dragging)return;
 	int width, height; glfwGetWindowSize(window, &width, &height); if (width <= 0 || height <= 0)return;
 	glm::vec3 offset = cameraPosition - cameraTarget; float radius = glm::length(offset);
 	float yaw = glm::atan(offset.x, offset.z), pitch = glm::asin(glm::clamp(offset.y / radius, -1.0f, 1.0f));
