@@ -71,6 +71,18 @@ using namespace std;
 #define TRUCK_YAW -90.0f
 #define TRUCK_OBJ_FILE "Truck.obj"
 #define TRUCK_MTL_FILE "Truck.mtl"
+// O: 옆면과 지붕을 한 덩어리로 열고 닫는다.
+#define TRUCK_OPEN_ANGLE 60.0f
+#define TRUCK_OPEN_SPEED 45.0f
+// 아래 값은 Truck.obj 원본 좌표의 지붕 모서리와 옆판 경계이다.
+// 트럭의 크기/위치는 truckModel로 적용되므로 이 값은 함께 바꿀 필요가 없다.
+#define TRUCK_HINGE_X -5.784952f
+#define TRUCK_HINGE_Y 16.474405f
+#define TRUCK_SIDE_X 5.90f
+#define TRUCK_SIDE_BOTTOM 5.927f
+#define TRUCK_PANEL_FRONT_Z -15.49f
+#define TRUCK_PANEL_BACK_Z -58.16f
+#define TRUCK_ROOF_BOTTOM 16.32f
 #define PARKING_MARGIN 0.50f
 // 주차선 바깥부터 맵 가장자리까지 확보할 통로 폭
 #define MAP_EDGE_CLEARANCE 3.0f
@@ -97,16 +109,20 @@ GLint modelLocation, viewLocation, projectionLocation, colorLocation, eyeLocatio
 int surfaceCount = 0;
 
 // 같은 재질의 삼각형을 한 번에 그리는 구간
-struct TruckPart { int first, count; glm::vec3 color; };
+struct TruckPart { int first, count; glm::vec3 color; bool wing; };
 vector<TruckPart> truckParts;
 GLuint truckVao = 0, truckVbo = 0;
 glm::vec3 truckSize(0), truckCenter(0), sceneOffset(0);
 glm::mat4 truckModel(1);
+float truckOpenAngle = 0;
+bool truckOpen = false;
 
 string ReadFile(const char* name);
 bool InitShader();
 bool InitTruck();
 void DrawTruck();
+void UpdateTruckDoor(float dt);
+glm::mat4 TruckWingTransform();
 glm::mat4 BeltTransform(float distance);
 void DrawBox(const glm::mat4& model, glm::vec3 size, glm::vec3 color);
 void DrawScene();
@@ -159,7 +175,7 @@ int main()
 	glUniform1f(glGetUniformLocation(programID, "diffuseStrength"), DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
-	cout << "b: start/stop | WASD: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
+	cout << "o: truck open/close | b: start/stop | WASD: camera | drag: orbit | wheel, +/-: zoom | p/P: PERSP/ORTHO | r: reset | q: quit" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
@@ -174,6 +190,7 @@ int main()
 		if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)movement += right;
 		if (glm::length(movement) > 0) { movement = glm::normalize(movement) * CAMERA_MOVE_SPEED * dt; cameraPosition += movement; cameraTarget += movement; }
 		if (moving)beltDistance = glm::mod(beltDistance + BELT_SPEED * dt, pathLength);
+		UpdateTruckDoor(dt);
 		int width, height; glfwGetFramebufferSize(window, &width, &height); glViewport(0, 0, width, height);
 		DrawScene(); glfwSwapBuffers(window);
 	}
@@ -192,7 +209,7 @@ bool InitTruck()
 			throw runtime_error("Cannot open Truck.obj / Truck.mtl");
 
 		map<string, glm::vec3> colors;
-		string line, name;
+		string line, name, objectName;
 		while (getline(materialFile, line)) {
 			istringstream input(line);
 			string type; input >> type;
@@ -211,6 +228,7 @@ bool InitTruck()
 				glm::vec3 value; input >> value.x >> value.y >> value.z;
 				(type == "v" ? positions : normals).push_back(value);
 			}
+			else if (type == "o") input >> objectName;
 			else if (type == "usemtl") {
 				input >> name;
 				auto found = colors.find(name);
@@ -240,8 +258,16 @@ bool InitTruck()
 						triangle[2].position - triangle[0].position);
 					if (glm::length(normal) < .000001f) continue;
 					normal = glm::normalize(normal);
-					if (truckParts.empty() || truckParts.back().color != color)
-						truckParts.push_back({ (int)vertices.size(), 0, color });
+					// 짐칸의 +X 옆판(현재 벨트 쪽)과 지붕만 움직인다.
+					// 뒤/앞 벽과 하부 프레임은 그대로 둔다. 원본 OBJ는 수정하지 않는다.
+					glm::vec3 low = glm::min(triangle[0].position, glm::min(triangle[1].position, triangle[2].position));
+					glm::vec3 high = glm::max(triangle[0].position, glm::max(triangle[1].position, triangle[2].position));
+					bool roof = low.y >= TRUCK_ROOF_BOTTOM;
+					bool side = low.x >= TRUCK_SIDE_X && low.y >= TRUCK_SIDE_BOTTOM
+						&& low.z >= TRUCK_PANEL_BACK_Z && high.z <= TRUCK_PANEL_FRONT_Z;
+					bool wing = objectName == "Cube" && (roof || side);
+					if (truckParts.empty() || truckParts.back().color != color || truckParts.back().wing != wing)
+						truckParts.push_back({ (int)vertices.size(), 0, color, wing });
 					for (Vertex vertex : triangle) {
 						if (glm::length(vertex.normal) < .000001f) vertex.normal = normal;
 						vertices.push_back(vertex);
@@ -289,6 +315,23 @@ bool InitTruck()
 	}
 }
 
+// 목표 각도까지 일정한 속도로 이동한다. 도중에 O를 누르면 현재 각도에서 방향을 바꾼다.
+void UpdateTruckDoor(float dt)
+{
+	float target = truckOpen ? TRUCK_OPEN_ANGLE : 0.0f;
+	float step = TRUCK_OPEN_SPEED * dt;
+	truckOpenAngle += glm::clamp(target - truckOpenAngle, -step, step);
+}
+
+// 지붕 반대쪽 모서리의 길이 방향 축(Z)을 중심으로 옆판과 지붕에 같은 회전을 적용한다.
+glm::mat4 TruckWingTransform()
+{
+	glm::vec3 hinge(TRUCK_HINGE_X, TRUCK_HINGE_Y, 0);
+	return truckModel * glm::translate(glm::mat4(1), hinge)
+		* glm::rotate(glm::mat4(1), glm::radians(truckOpenAngle), glm::vec3(0, 0, 1))
+		* glm::translate(glm::mat4(1), -hinge);
+}
+
 // 바퀴 최하단은 Y=0에 놓고 주차선은 바닥보다 살짝 높여 겹침을 방지한다.
 void DrawTruck()
 {
@@ -301,9 +344,13 @@ void DrawTruck()
 		DrawBox(glm::translate(glm::mat4(1), endLine),
 			glm::vec3(PARKING_LINE_WIDTH, PARKING_LINE_HEIGHT, parkingSize.z + PARKING_LINE_WIDTH), glm::vec3(1));
 	}
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(truckModel));
+	// 원본 하부 프레임 위에 얇은 적재 바닥을 놓아 내부가 열린 상태에서도 바닥이 보인다.
+	DrawBox(glm::translate(truckModel, glm::vec3(.161608f, 5.40f, -36.30f)),
+		glm::vec3(11.75f, .16f, 41.5f), glm::vec3(.30f));
+	glm::mat4 wingModel = TruckWingTransform();
 	glBindVertexArray(truckVao);
 	for (const TruckPart& part : truckParts) {
+		glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(part.wing ? wingModel : truckModel));
 		glUniform3fv(colorLocation, 1, glm::value_ptr(part.color));
 		glDrawArrays(GL_TRIANGLES, part.first, part.count);
 	}
@@ -389,8 +436,10 @@ void KeyCallback(GLFWwindow* window, int key, int, int action, int mods)
 	if (action != GLFW_PRESS)return;
 	if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window, true);
 	if (key == GLFW_KEY_B)moving = !moving;
+	if (key == GLFW_KEY_O)truckOpen = !truckOpen;
 	if (key == GLFW_KEY_P)perspective = (mods & GLFW_MOD_SHIFT) == 0;
 	if (key == GLFW_KEY_R) {
+		truckOpen = false; truckOpenAngle = 0;
 		beltDistance = 0; moving = false; perspective = true; dragging = false; viewRange = VIEW_RANGE;
 		cameraPosition = glm::vec3(CAMERA_X, CAMERA_Y, CAMERA_Z) + sceneOffset; cameraTarget = glm::vec3(CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z) + sceneOffset;
 	}
