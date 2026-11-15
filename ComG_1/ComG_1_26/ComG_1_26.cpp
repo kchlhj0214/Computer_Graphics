@@ -50,6 +50,10 @@ using namespace std;
 #define DIFFUSE_STRENGTH 0.85f
 #define SPECULAR_STRENGTH 0.45f
 #define SHININESS 32.0f
+#define FILL_LIGHT_X 2.0f
+#define FILL_LIGHT_Y 4.0f
+#define FILL_LIGHT_Z 2.0f
+#define FILL_LIGHT_INTENSITY 0.08f
 
 struct Vertex { glm::vec3 position, normal; };
 enum ObjectType { CUBE, PYRAMID };
@@ -305,6 +309,8 @@ bool InitShader()
 	glUniform1f(glGetUniformLocation(programID, "diffuseStrength"), DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "specularStrength"), SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID, "shininess"), SHININESS);
+	glUniform3f(glGetUniformLocation(programID,"fillLightPosition"),FILL_LIGHT_X,FILL_LIGHT_Y,FILL_LIGHT_Z);
+	glUniform1f(glGetUniformLocation(programID,"fillLightIntensity"),FILL_LIGHT_INTENSITY);
 	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0
 		&& lightingLocation >= 0 && lightLocation >= 0 && eyeLocation >= 0;
 }

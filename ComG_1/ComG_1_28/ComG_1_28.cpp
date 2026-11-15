@@ -73,6 +73,10 @@ using namespace std;
 #define DIFFUSE_STRENGTH 1.0f
 #define SPECULAR_STRENGTH 0.45f
 #define SHININESS 32.0f
+#define FILL_LIGHT_X 2.0f
+#define FILL_LIGHT_Y 4.0f
+#define FILL_LIGHT_Z 2.0f
+#define FILL_LIGHT_INTENSITY 0.08f
 
 struct Vertex { glm::vec3 position, normal; };
 bool lightEnabled=true;
@@ -223,6 +227,8 @@ void DrawScene()
 	glUniform1f(glGetUniformLocation(programID,"diffuseStrength"),DIFFUSE_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID,"specularStrength"),SPECULAR_STRENGTH);
 	glUniform1f(glGetUniformLocation(programID,"shininess"),SHININESS);
+	glUniform3f(glGetUniformLocation(programID,"fillLightPosition"),FILL_LIGHT_X,FILL_LIGHT_Y,FILL_LIGHT_Z);
+	glUniform1f(glGetUniformLocation(programID,"fillLightIntensity"),FILL_LIGHT_INTENSITY);
 	DrawBox(glm::translate(glm::mat4(1), glm::vec3(0, -FLOOR_HEIGHT * .5f, 0)),
 		glm::vec3(FLOOR_WIDTH, FLOOR_HEIGHT, FLOOR_DEPTH), glm::vec3(FLOOR_RED, FLOOR_GREEN, FLOOR_BLUE));
 	float lowerHeight = LOWER_HEIGHT * glm::mix(LOWER_SCALE_MIN, LOWER_SCALE_MAX, (glm::sin(lowerPhase) + 1) * .5f);
