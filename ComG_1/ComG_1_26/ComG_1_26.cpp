@@ -1,4 +1,4 @@
-#include <GL/glew.h>
+﻿#include <GL/glew.h>
 #include <GL/glfw3.h>
 #include <GL/glu.h>
 #include <GL/glm/glm/glm.hpp>
@@ -194,7 +194,8 @@ void DrawScene(int width, int height)
 	model = glm::rotate(model, glm::radians(OBJECT_ROTATE_X), glm::vec3(1, 0, 0));
 	model = glm::scale(model, glm::vec3(OBJECT_SIZE));
 	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-	glUniform3f(colorLocation, OBJECT_RED, OBJECT_GREEN, OBJECT_BLUE); glUniform1i(lightingLocation, lightEnabled);
+	glUniform3f(colorLocation, OBJECT_RED, OBJECT_GREEN, OBJECT_BLUE); glUniform1i(lightingLocation, true);
+	glUniform1i(glGetUniformLocation(programID,"lightEnabled"),lightEnabled);
 	glBindVertexArray(vao); glDrawArrays(GL_TRIANGLES, objectType == CUBE ? cubeFirst : pyramidFirst, objectType == CUBE ? 36 : 18);
 	// 궤도, 좌표축, 광원 표시는 조명 영향을 받지 않고 고유 색상으로 표시합니다.
 	glUniform1i(lightingLocation, false);
