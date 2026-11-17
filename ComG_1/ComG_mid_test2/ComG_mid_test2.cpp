@@ -3,8 +3,8 @@
 
 #include <GL/glew.h>
 #include <GL/glfw3.h>
-#include <GL/glm/glm/glm.hpp>
-#include <GL/glm/glm/ext.hpp>
+#include <GL/glm/glm.hpp>
+#include <GL/glm/ext.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>

@@ -1,0 +1,103 @@
+{
+  "settings": {
+    "width": 4,
+    "depth": 4,
+    "segments": 32,
+    "undersideInset": 0.002,
+    "pyramidHeight": 1.6,
+    "pyramidBaseY": 0
+  },
+  "stages": [
+    {
+      "id": "light",
+      "level": 1,
+      "minimumDepth": 0.03,
+      "maximumDepth": 0.08,
+      "label": "얇게 쌓인 눈"
+    },
+    {
+      "id": "medium",
+      "level": 2,
+      "minimumDepth": 0.12,
+      "maximumDepth": 0.24,
+      "label": "중간 정도 쌓인 눈"
+    },
+    {
+      "id": "deep",
+      "level": 3,
+      "minimumDepth": 0.3,
+      "maximumDepth": 0.5,
+      "label": "두껍게 쌓인 눈"
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "plane",
+      "kind": "flat",
+      "height": 0
+    },
+    {
+      "id": "pyramid",
+      "kind": "square-pyramid",
+      "height": 1.6
+    }
+  ],
+  "material": {
+    "id": "snow",
+    "diffuse": [
+      0.94,
+      0.97,
+      1
+    ],
+    "specular": [
+      0.12,
+      0.12,
+      0.12
+    ],
+    "shininess": 24
+  },
+  "models": [
+    {
+      "surface": "plane",
+      "stage": "light",
+      "amount": 1,
+      "obj": "snow_plane_1.obj",
+      "material": "snow_accumulation.mtl"
+    },
+    {
+      "surface": "plane",
+      "stage": "medium",
+      "amount": 2,
+      "obj": "snow_plane_2.obj",
+      "material": "snow_accumulation.mtl"
+    },
+    {
+      "surface": "plane",
+      "stage": "deep",
+      "amount": 3,
+      "obj": "snow_plane_3.obj",
+      "material": "snow_accumulation.mtl"
+    },
+    {
+      "surface": "pyramid",
+      "stage": "light",
+      "amount": 1,
+      "obj": "snow_pyramid_1.obj",
+      "material": "snow_accumulation.mtl"
+    },
+    {
+      "surface": "pyramid",
+      "stage": "medium",
+      "amount": 2,
+      "obj": "snow_pyramid_2.obj",
+      "material": "snow_accumulation.mtl"
+    },
+    {
+      "surface": "pyramid",
+      "stage": "deep",
+      "amount": 3,
+      "obj": "snow_pyramid_3.obj",
+      "material": "snow_accumulation.mtl"
+    }
+  ]
+}

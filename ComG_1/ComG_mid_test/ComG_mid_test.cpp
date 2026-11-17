@@ -4,8 +4,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <GL/glm/glm/glm.hpp>
-#include <GL/glm/glm/ext.hpp>
+#include <GL/glm/glm.hpp>
+#include <GL/glm/ext.hpp>
 #include <map>
 #include <vector>
 #include <set>
