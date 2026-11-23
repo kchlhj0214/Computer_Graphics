@@ -1,6 +1,7 @@
-﻿// 시험용 원본 켜기: 바로 아래 #if 0을 #if 1로 바꿉니다.
-// 위쪽은 기존 중간대비2, 아래쪽은 같은 틀로 만든 인형뽑기 예제입니다.
-#if 0
+﻿// 0 = 시험용 중간대비2 원본, 1 = 인형뽑기, 2 = 중간대비1 그네
+// 아래 숫자 하나를 바꾸고 다시 빌드합니다.
+#define MID_TEST_EXAMPLE 1
+#if MID_TEST_EXAMPLE == 0
 //프로젝트속성->링커->명령줄에다음과같이3개의라이브러리추가
 //-> opengl32.lib glew32.lib glfw3.lib glu32.lib
 
@@ -1244,7 +1245,7 @@ bool InitShader()
 	colorLocation = glGetUniformLocation(programID, "uColor");
 	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
 }
-#else
+#elif MID_TEST_EXAMPLE == 1
 // 인형뽑기 예제
 //프로젝트속성->링커->명령줄에다음과같이3개의라이브러리추가
 //-> opengl32.lib glew32.lib glfw3.lib glu32.lib
@@ -1316,6 +1317,8 @@ using namespace std;
 #define BACKGROUND_BLUE 1.0f
 
 // 인형뽑기 크기와 동작 설정
+#define CLAW_COUNT 2          // 몸체 둘레의 집게발 수: 2, 3, 4
+#define CLAW_SEGMENT_COUNT 2  // 집게발 한 쪽의 육면체 수: 1, 2
 #define CLAW_CEILING_Y 2.50f
 #define CLAW_CEILING_THICKNESS .06f
 #define CLAW_HEAD_HEIGHT .12f
@@ -1325,7 +1328,10 @@ using namespace std;
 #define CLAW_UPPER_LENGTH .29f
 #define CLAW_LOWER_LENGTH .28f
 #define CLAW_JAW_WIDTH .065f
-#define CLAW_OPEN_ANGLE 24.0f
+#define CLAW_SINGLE_LENGTH .55f
+#define CLAW_SINGLE_OPEN_ANGLE 16.0f
+#define CLAW_SINGLE_CLOSED_ANGLE -17.0f
+#define CLAW_DOUBLE_OPEN_ANGLE 24.0f
 #define CLAW_ELBOW_ANGLE 36.0f
 #define CLAW_TIP_CLEARANCE .012f
 #define CLAW_MOVE_SPEED .95f
@@ -1345,7 +1351,17 @@ using namespace std;
 #define PRIZE_COUNT 6
 #define PRIZE_GRAVITY 6.0f
 
-enum ClawPart { CLAW_HEAD, CLAW_ROD, CLAW_BODY, LEFT_UPPER, LEFT_LOWER, RIGHT_UPPER, RIGHT_LOWER, PRIZE_FIRST };
+// 집게발마다 두 칸을 예약해 개수를 바꾸더라도 경품 번호는 11번부터 시작합니다.
+enum ClawPart { CLAW_HEAD, CLAW_ROD, CLAW_BODY, CLAW_FIRST_FINGER };
+constexpr int CLAW_MAX_COUNT=4;
+constexpr int PRIZE_FIRST=CLAW_FIRST_FINGER+CLAW_MAX_COUNT*2;
+constexpr float CLAW_FIRST_LENGTH=CLAW_SEGMENT_COUNT==2 ? CLAW_UPPER_LENGTH : CLAW_SINGLE_LENGTH;
+constexpr float CLAW_OPEN_ANGLE=CLAW_SEGMENT_COUNT==2 ? CLAW_DOUBLE_OPEN_ANGLE : CLAW_SINGLE_OPEN_ANGLE;
+constexpr float CLAW_CLOSED_ANGLE=CLAW_SEGMENT_COUNT==2 ? 0.0f : CLAW_SINGLE_CLOSED_ANGLE;
+constexpr float CLAW_BAR_DEPTH=CLAW_COUNT==2 ? .14f : CLAW_BAR_WIDTH;
+const float CLAW_AZIMUTH_STEP=glm::two_pi<float>()/CLAW_COUNT;
+static_assert(CLAW_COUNT>=2 && CLAW_COUNT<=4,"Use 2, 3, or 4 claws");
+static_assert(CLAW_SEGMENT_COUNT==1 || CLAW_SEGMENT_COUNT==2,"Use 1 or 2 segments per claw");
 
 static_assert(MOVE_SPEED>0 && ROTATE_SPEED>0 && SCALE_SPEED>0 && ANIMATION_FPS>0,
     "Animation speeds must be positive");
@@ -1442,11 +1458,15 @@ struct BoxState
 const array<BoxSetting,BOX_COUNT> boxSettings={{
     {true,{.26f,CLAW_HEAD_HEIGHT,.26f},{0,CLAW_CEILING_Y-CLAW_HEAD_HEIGHT*.5f,0},{.15f,.31f,.48f}}, // 이동부
     {true,{.085f,CLAW_ROD_LENGTH,.085f},{0,0,0},{.38f,.48f,.57f}}, // 세로 막대
-    {true,{CLAW_BAR_WIDTH,CLAW_BAR_HEIGHT,.14f},{0,0,0},{.18f,.34f,.50f}}, // 집게 몸체
-    {true,{CLAW_JAW_WIDTH,CLAW_UPPER_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 왼쪽 위 관절
-    {true,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,CLAW_ELBOW_ANGLE}}, // 왼쪽 끝
-    {true,{CLAW_JAW_WIDTH,CLAW_UPPER_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 오른쪽 위 관절
-    {true,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,-CLAW_ELBOW_ANGLE}}, // 오른쪽 끝
+    {true,{CLAW_BAR_WIDTH,CLAW_BAR_HEIGHT,CLAW_BAR_DEPTH},{0,0,0},{.18f,.34f,.50f}}, // 집게 몸체
+    {true,{CLAW_JAW_WIDTH,CLAW_FIRST_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 집게발 1 첫 마디
+    {CLAW_SEGMENT_COUNT==2,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,-CLAW_ELBOW_ANGLE}}, // 집게발 1 끝 마디
+    {true,{CLAW_JAW_WIDTH,CLAW_FIRST_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 집게발 2 첫 마디
+    {CLAW_SEGMENT_COUNT==2,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,-CLAW_ELBOW_ANGLE}}, // 집게발 2 끝 마디
+    {CLAW_COUNT>=3,{CLAW_JAW_WIDTH,CLAW_FIRST_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 집게발 3 첫 마디
+    {CLAW_COUNT>=3 && CLAW_SEGMENT_COUNT==2,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,-CLAW_ELBOW_ANGLE}}, // 집게발 3 끝 마디
+    {CLAW_COUNT>=4,{CLAW_JAW_WIDTH,CLAW_FIRST_LENGTH,.09f},{0,0,0},{.97f,.57f,.17f}}, // 집게발 4 첫 마디
+    {CLAW_COUNT>=4 && CLAW_SEGMENT_COUNT==2,{CLAW_JAW_WIDTH,CLAW_LOWER_LENGTH,.09f},{0,0,0},{.96f,.40f,.10f},{0,0,-CLAW_ELBOW_ANGLE}}, // 집게발 4 끝 마디
     {true,glm::vec3(PRIZE_SIZE),{0,PRIZE_SIZE*.5f,0},{.87f,.25f,.35f}},
     {true,glm::vec3(PRIZE_SIZE),{-.92f,PRIZE_SIZE*.5f,-.61f},{.26f,.61f,.87f}},
     {true,glm::vec3(PRIZE_SIZE),{.88f,PRIZE_SIZE*.5f,.50f},{.24f,.73f,.52f}},
@@ -2070,12 +2090,8 @@ void KeyCallback(GLFWwindow*,int,int,int,int);
 void MouseCallback(GLFWwindow*,int,int,int);
 void CursorCallback(GLFWwindow*,double,double);
 void ScrollCallback(GLFWwindow*,double,double);
-// Run으로 각 단계를 실행하고 IsFinished로 다음 단계가 시작될 때를 판단합니다.
-enum class ClawPhase { Ready, Lowering, Closing, Lifting, Travelling, Settling, Opening, Dropping };
-ClawPhase clawPhase=ClawPhase::Ready;
-int clawJob=0,heldPrize=-1;
-bool jawsOpen=false;
-float rodExtension=1,prizeFallSpeed=0,prizeLandingY=0,clawSettleTime=0;
+// 명령 설정이 키 입력과 매 갱신 시점을 함께 받을 수 있게 연결합니다.
+void CustomKey(GLFWwindow* window,int key,float dt=0);
 
 int main()
 {
@@ -2167,168 +2183,31 @@ void ResetScene()
     // 수정 영역 ①-추가: Attach(부모,자식,부모 연결점,자식 연결점).
     Attach(CLAW_HEAD,CLAW_ROD,Pivot::Bottom,Pivot::Top);
     Attach(CLAW_ROD,CLAW_BODY,Pivot::Bottom,Pivot::Top);
-    Attach(CLAW_BODY,LEFT_UPPER,Point(-CLAW_BAR_WIDTH*.5f,-CLAW_BAR_HEIGHT*.5f,0),Pivot::Top);
-    Attach(CLAW_BODY,RIGHT_UPPER,Point(CLAW_BAR_WIDTH*.5f,-CLAW_BAR_HEIGHT*.5f,0),Pivot::Top);
-    Attach(LEFT_UPPER,LEFT_LOWER,Pivot::Bottom,Pivot::Top);
-    Attach(RIGHT_UPPER,RIGHT_LOWER,Pivot::Bottom,Pivot::Top);
+    for(int finger=0;finger<CLAW_COUNT;++finger)
+    {
+        int upper=CLAW_FIRST_FINGER+2*finger;
+        float azimuth=glm::pi<float>()+CLAW_AZIMUTH_STEP*finger;
+        glm::vec3 outward(glm::cos(azimuth),0,glm::sin(azimuth));
+        glm::vec3 hinge=outward*(CLAW_BAR_WIDTH*.5f)+glm::vec3(0,-CLAW_BAR_HEIGHT*.5f,0);
+        Attach(CLAW_BODY,upper,Point(hinge.x,hinge.y,hinge.z),Pivot::Top);
+        if(CLAW_SEGMENT_COUNT==2)
+            Attach(upper,upper+1,Pivot::Bottom,Pivot::Top);
+
+        // 로컬 +X가 바깥 방향을 보게 한 뒤 기본 닫힘 각도를 적용합니다.
+        glm::mat4 facing=glm::rotate(glm::mat4(1),-azimuth,glm::vec3(0,1,0));
+        boxes[upper].model=glm::rotate(facing,glm::radians(CLAW_CLOSED_ANGLE),glm::vec3(0,0,1))
+            *boxes[upper].model;
+    }
     // 천장 이동부 → 막대 → 집게 몸체에 각각 지연을 적용합니다.
     FollowLag(CLAW_ROD,Pivot::Top,CLAW_ROD_LAG_SECONDS,CLAW_ROD_LAG_ANGLE);
     FollowLag(CLAW_BODY,Pivot::Top,CLAW_BODY_LAG_SECONDS,CLAW_BODY_LAG_ANGLE);
-    clawPhase=ClawPhase::Ready;
-    clawJob=0;heldPrize=-1;jawsOpen=false;
-    rodExtension=1;prizeFallSpeed=0;prizeLandingY=0;clawSettleTime=0;
+    CustomKey(nullptr,GLFW_KEY_R);
     EvaluateHierarchy();
 }
 
 // ============================================================================
 // 5. 애니메이션, 전체 방향키 이동, 카메라
 // ============================================================================
-// 열린 집게의 끝이 바닥 위에 오도록 막대 신축 배율을 구합니다.
-float ClawExtension()
-{
-    float upperAngle=glm::radians(CLAW_OPEN_ANGLE);
-    float lowerAngle=glm::radians(CLAW_OPEN_ANGLE-CLAW_ELBOW_ANGLE);
-    float reach=CLAW_UPPER_LENGTH*glm::cos(upperAngle)+CLAW_LOWER_LENGTH*glm::cos(lowerAngle)
-        +CLAW_JAW_WIDTH*.5f*glm::abs(glm::sin(lowerAngle));
-    return (CLAW_CEILING_Y-CLAW_HEAD_HEIGHT-CLAW_BAR_HEIGHT-reach-CLAW_TIP_CLEARANCE)/CLAW_ROD_LENGTH;
-}
-
-// 양팔은 가로대 양끝에 붙은 윗면을 축으로 회전합니다.
-Command JawMotion(bool open,float seconds)
-{
-    float change=(float(open)-float(jawsOpen))*CLAW_OPEN_ANGLE;
-    jawsOpen=open;
-    return Parallel({Rotate(LEFT_UPPER,Axis::Z,-change,Pivot::Top,seconds),
-        Rotate(RIGHT_UPPER,Axis::Z,change,Pivot::Top,seconds)});
-}
-
-void StartClawCycle()
-{
-    if(clawPhase!=ClawPhase::Ready)return;
-    rodExtension=ClawExtension();
-    clawJob=Run(Parallel({
-        Scale(CLAW_ROD,Axis::Y,rodExtension-1,Pivot::Top,CLAW_LOWER_SECONDS),
-        JawMotion(true,CLAW_LOWER_SECONDS)
-    }));
-    clawPhase=ClawPhase::Lowering;
-}
-
-// 닫힌 집게 사이의 경품 중 가운데와 가까운 하나를 현재 위치에서 몸체에 붙입니다.
-void CatchPrize()
-{
-    glm::mat4 toGrip=glm::inverse(boxes[CLAW_BODY].world);
-    float bestDistance=1e10f;
-    glm::vec3 bestPoint(0);
-    for(int id=PRIZE_FIRST;id<PRIZE_FIRST+PRIZE_COUNT;++id)
-    {
-        glm::vec3 local=glm::vec3(toGrip*boxes[id].world[3])*boxes[CLAW_BODY].baseSize;
-        if(glm::abs(local.x)>.13f || glm::abs(local.z)>.16f
-            || local.y<-(CLAW_UPPER_LENGTH+CLAW_LOWER_LENGTH) || local.y>-.16f)
-            continue;
-        float distance=local.x*local.x+local.z*local.z;
-        if(distance>=bestDistance)continue;
-        bestDistance=distance;heldPrize=id;bestPoint=local;
-    }
-    if(heldPrize>=0)
-        Attach(CLAW_BODY,heldPrize,Point(bestPoint.x,bestPoint.y,bestPoint.z),Pivot::Center,Orientation::KeepWorld);
-}
-
-void ReleasePrize()
-{
-    auto& prize=boxes[heldPrize];
-    // 붙어 있던 최종 자세를 독립 객체의 시작 자세로 사용합니다.
-    prize.model=prize.world;
-    prize.parent=-1;
-    prize.attachment={};
-    glm::vec3 center(prize.model[3]);
-    prizeLandingY=PRIZE_SIZE*.5f;
-    for(int id=PRIZE_FIRST;id<PRIZE_FIRST+PRIZE_COUNT;++id)
-    {
-        if(id==heldPrize)continue;
-        glm::vec3 other(boxes[id].world[3]);
-        if(glm::abs(other.x-center.x)<PRIZE_SIZE && glm::abs(other.z-center.z)<PRIZE_SIZE
-            && other.y<center.y)
-            prizeLandingY=glm::max(prizeLandingY,other.y+PRIZE_SIZE);
-    }
-    prizeFallSpeed=0;
-    clawPhase=ClawPhase::Dropping;
-}
-
-void UpdateClawCycle(float dt)
-{
-    if(clawPhase==ClawPhase::Ready)return;
-    if(clawPhase==ClawPhase::Dropping)
-    {
-        prizeFallSpeed+=PRIZE_GRAVITY*dt;
-        auto& height=boxes[heldPrize].model[3].y;
-        height=glm::max(prizeLandingY,height-prizeFallSpeed*dt);
-        if(height<=prizeLandingY)
-        {
-            heldPrize=-1;
-            clawPhase=ClawPhase::Ready;
-        }
-        return;
-    }
-    if(!IsFinished(clawJob))return;
-    switch(clawPhase)
-    {
-    case ClawPhase::Lowering:
-        clawJob=Run(JawMotion(false,CLAW_CLOSE_SECONDS));
-        clawPhase=ClawPhase::Closing;
-        break;
-    case ClawPhase::Closing:
-        CatchPrize();
-        clawJob=Run(Scale(CLAW_ROD,Axis::Y,1/rodExtension-1,Pivot::Top,CLAW_LIFT_SECONDS));
-        clawPhase=ClawPhase::Lifting;
-        break;
-    case ClawPhase::Lifting:
-    {
-        glm::vec3 delta=glm::vec3(CLAW_DROP_X,boxes[CLAW_HEAD].model[3].y,CLAW_DROP_Z)
-            -glm::vec3(boxes[CLAW_HEAD].model[3]);
-        clawJob=Run(Move(CLAW_HEAD,delta,glm::max(.25f,glm::length(delta)/CLAW_MOVE_SPEED)));
-        clawPhase=ClawPhase::Travelling;
-        break;
-    }
-    case ClawPhase::Travelling:
-        // 낙하 구역에서 흔들림이 잦아들 시간을 줍니다.
-        clawSettleTime=CLAW_SETTLE_SECONDS;
-        clawPhase=ClawPhase::Settling;
-        break;
-    case ClawPhase::Settling:
-        clawSettleTime-=dt;
-        if(clawSettleTime>0)break;
-        clawJob=Run(JawMotion(true,CLAW_RELEASE_SECONDS));
-        clawPhase=ClawPhase::Opening;
-        break;
-    case ClawPhase::Opening:
-        if(heldPrize>=0)ReleasePrize();
-        else clawPhase=ClawPhase::Ready;
-        break;
-    default:
-        break;
-    }
-}
-
-// 방향키를 유지하는 동안 작은 Move를 적용합니다. 자동 동작이 끝나면 다시 움직일 수 있습니다.
-void MoveClawWhileHeld(GLFWwindow* window,float dt)
-{
-    if(clawPhase!=ClawPhase::Ready)return;
-    glm::vec3 direction(0);
-    if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)direction.x+=1;
-    if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)direction.x-=1;
-    if(glfwGetKey(window,GLFW_KEY_UP)==GLFW_PRESS)direction.z+=1;
-    if(glfwGetKey(window,GLFW_KEY_DOWN)==GLFW_PRESS)direction.z-=1;
-    if(glm::length(direction)==0)return;
-    glm::vec3 center(boxes[CLAW_HEAD].model[3]);
-    glm::vec3 end=center+glm::normalize(direction)*CLAW_MOVE_SPEED*dt;
-    float halfX=FLOOR_WIDTH*.5f-CLAW_EDGE_MARGIN;
-    float halfZ=FLOOR_DEPTH*.5f-CLAW_EDGE_MARGIN;
-    end.x=glm::clamp(end.x,-halfX,halfX);
-    end.z=glm::clamp(end.z,-halfZ,halfZ);
-    auto move=Move(CLAW_HEAD,end-center,dt);
-    Advance(move,dt);
-}
-
 void UpdateScene(GLFWwindow* window,float dt)
 {
     accumulator+=dt;
@@ -2338,9 +2217,8 @@ void UpdateScene(GLFWwindow* window,float dt)
         accumulator-=step;
         for(auto& job:jobs)
             if(!job.paused && !job.command.done)Advance(job.command,step);
-        MoveClawWhileHeld(window,step);
+        CustomKey(window,GLFW_KEY_UNKNOWN,step);
         EvaluateHierarchy(step);
-        UpdateClawCycle(step);
     }
     // 카메라 로컬 +X는 오른쪽, 로컬 +Z는 뒤쪽입니다. Shift는 음의 방향입니다.
     glm::vec3 forward=glm::normalize(cameraTarget-cameraPosition);
@@ -2429,57 +2307,179 @@ void DrawScene(int width,int height)
 }
 
 // ============================================================================
-// 상속 예시: 0번 몸통, 1번 팔(parent=0)을 설정한 경우
-// Run(Repeat(PingPong(Rotate(1,Axis::X,30,Pivot::Top,1.0f)),Forever));
-// Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f));
-// 위 두 작업은 함께 실행 가능합니다. 몸통이 돌아도 팔의 어깨와 흔드는 축이 함께 돌아갑니다.
-// 팔의 Point(...)는 부모 중심 기준이며, Pivot::Top은 부모 공간에서 기록한 팔의 윗면입니다.
-// 부모와 자식에게 같은 전체 이동/회전을 중복 지정하면 두 번 적용되므로 전체 동작은 부모만 지정합니다.
-// Swap은 부모 번호와 inheritScale 설정이 같은 두 객체 사이에서 사용합니다.
-// 부모 없는 기존 객체 설정과 함수 호출은 변경할 필요가 없습니다.
-// 수정 영역 ②: 예비 키 9개. 아래 주석을 참고해 원하는 명령만 작성합니다.
-// 명령의 객체 번호는 수정 영역 ①의 0~39와 같습니다.
-//
-// 단일 실행: Run(Move(0,{1,0,0}));
-// 스왑: Run(Swap(0,1,2.0f)); // 두 객체의 중심 위치를 2초 동안 교환합니다.
-// 스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f),Forever)); // 2초마다 교환하며 4초마다 원위치로 돌아옵니다.
-// 직선 스왑: Run(Swap(0,1,2.0f,SwapMode::Direct));
-// XZ 반원 스왑: Run(Swap(0,1,2.0f,SwapMode::ArcXZ));
-// XZ ㄷ자 스왑: Run(Swap(0,1,2.0f,SwapMode::DetourXZ));
-// XY ㄷ자 스왑: Run(Swap(0,1,2.0f,SwapMode::DetourXY));
-// 방식 지정 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
-// 시간 지정: Run(Move(0,{1,0,0},2.0f)); // 편도 2초
-// 회전 시간 지정: Run(Rotate(0,Axis::Y,90,Pivot::Center,3.0f)); // 편도 3초
-// 신축 시간 지정: Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 편도 1초
-// 시간을 생략하거나 0으로 지정하면 MOVE_SPEED / ROTATE_SPEED / SCALE_SPEED를 사용합니다.
-// Rotate와 Scale의 시간을 지정할 때는 기준점도 반드시 적습니다.
-// PingPong의 왕복 시간은 편도 시간의 두 배입니다.
-// 동시 왕복 주기 맞추기: 아래 명령은 함께 1초 동안 변환하고 1초 동안 돌아옵니다.
-// slots[0]=Run(Repeat(Parallel({PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),PingPong(Move(1,{0,.05f,0},1.0f))}),Forever));
-// Repeat 자체가 시간을 맞추지는 않습니다. 동시에 왕복할 변환의 편도 시간을 같게 지정합니다.
-// 동시 실행: Run(Parallel({Move(0,{1,0,0}),Rotate(1,Axis::Y,90)}));
-// 순차 실행: Run(Sequence({Move(0,{1,0,0}),Rotate(0,Axis::Y,90),Scale(0,Axis::Y,+.5f,Pivot::Bottom)}));
-// 3회 반복: Run(Repeat(Move(0,{.2f,0,0}),3)); // 상대 이동 누적
-// 3회 왕복: Run(Repeat(PingPong(Move(0,{1,0,0})),3));
-// 무한 왕복: slots[0]=Run(Repeat(PingPong(Rotate(0,Axis::Y,90)),Forever));
-// 정지/재개: TogglePause(slots[0]); // Pause, Resume를 따로 사용해도 됩니다.
-// 완료 확인: if(IsFinished(slots[0])) slots[0]=Run(Move(0,{1,0,0}));
-// 현재 상태에서 취소: Cancel(slots[0]);
-// 시작 또는 정지/재개:
-// if(IsFinished(slots[0])) slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0})),Forever));
-// else TogglePause(slots[0]);
-//
-// 하나처럼 회전: 모든 객체에 같은 Point를 지정합니다. 각자 Center를 사용하면 제자리 회전입니다.
-// Center 자전은 현재 중심을 따라가므로 Move, Swap, Point 기준 공전과 동시에 사용할 수 있습니다.
-// 공전하며 자전: Run(Parallel({Rotate(0,Axis::Y,360,Point(0,0,0),4.0f),Repeat(Rotate(0,Axis::X,360,Pivot::Center,1.0f),4)}));
-// Run(Parallel({Rotate(0,Axis::Y,90,Point(0,0,0)),Rotate(1,Axis::Y,90,Point(0,0,0))}));
-// 같은 객체에 동시 변환을 주면 고정 시간 간격마다 목록 순서로 합성합니다.
-// 무한반복을 Sequence 중간에 넣으면 뒤 명령은 실행되지 않습니다.
-// 비활성 객체는 보이지 않고 변환도 적용하지 않습니다. 명령의 진행 시간은 유지합니다.
-// ============================================================================
-void CustomKey(int key)
+// 수정 영역 ②: 키 입력과 단계별 변환 설정
+// GLFW_KEY_UNKNOWN은 일반 키 대신 고정 시간 갱신을 뜻합니다.
+void CustomKey(GLFWwindow* window,int key,float dt)
 {
-    if(key==GLFW_KEY_SPACE)StartClawCycle();
+    enum class Phase { Ready, Grabbing, Delivering, Opening, Dropping };
+    static Phase phase=Phase::Ready;
+    static float jawAngle=CLAW_CLOSED_ANGLE,openingStart=CLAW_CLOSED_ANGLE,phaseTime=0;
+    static int job=0,heldPrize=-1;
+    static float rodExtension=1,fallSpeed=0,landingY=0;
+
+    if(key==GLFW_KEY_R)
+    {
+        phase=Phase::Ready;
+        jawAngle=openingStart=CLAW_CLOSED_ANGLE;phaseTime=0;
+        job=0;heldPrize=-1;
+        rodExtension=1;fallSpeed=0;landingY=0;
+        return;
+    }
+
+    if(key==GLFW_KEY_SPACE && phase==Phase::Ready)
+    {
+        // 여닫는 동안 집게발이 가장 아래로 뻗는 길이를 구해 바닥 관통을 막습니다.
+        float reach=0;
+        for(int i=0;i<=64;++i)
+        {
+            float angle=glm::radians(glm::mix(CLAW_CLOSED_ANGLE,CLAW_OPEN_ANGLE,i/64.0f));
+            float first=CLAW_FIRST_LENGTH*glm::cos(angle);
+            reach=glm::max(reach,first+CLAW_JAW_WIDTH*.5f*glm::abs(glm::sin(angle)));
+            if(CLAW_SEGMENT_COUNT==2)
+            {
+                float lower=angle-glm::radians(CLAW_ELBOW_ANGLE);
+                reach=glm::max(reach,first+CLAW_LOWER_LENGTH*glm::cos(lower)
+                    +CLAW_JAW_WIDTH*.5f*glm::abs(glm::sin(lower)));
+            }
+        }
+        rodExtension=(CLAW_CEILING_Y-CLAW_HEAD_HEIGHT-CLAW_BAR_HEIGHT-reach-CLAW_TIP_CLEARANCE)
+            /CLAW_ROD_LENGTH;
+        openingStart=jawAngle;
+        phaseTime=0;
+        job=Run(Scale(CLAW_ROD,Axis::Y,rodExtension-1,Pivot::Top,CLAW_LOWER_SECONDS));
+        phase=Phase::Grabbing;
+        return;
+    }
+    if(key!=GLFW_KEY_UNKNOWN || dt<=0)return;
+
+    phaseTime+=dt;
+    if(phase==Phase::Grabbing)
+    {
+        if(phaseTime<CLAW_LOWER_SECONDS)
+            jawAngle=glm::mix(openingStart,CLAW_OPEN_ANGLE,phaseTime/CLAW_LOWER_SECONDS);
+        else
+            jawAngle=glm::mix(CLAW_OPEN_ANGLE,CLAW_CLOSED_ANGLE,
+                glm::min((phaseTime-CLAW_LOWER_SECONDS)/CLAW_CLOSE_SECONDS,1.0f));
+    }
+    else if(phase==Phase::Opening)
+        jawAngle=glm::mix(CLAW_CLOSED_ANGLE,CLAW_OPEN_ANGLE,glm::min(phaseTime/CLAW_RELEASE_SECONDS,1.0f));
+
+    // 부모 공간에서 각 집게발의 접선 축을 기준으로 같은 각도를 적용합니다.
+    // Attach의 윗면 연결점이 고정되므로 집게발 아래만 움직입니다.
+    for(int finger=0;finger<CLAW_COUNT;++finger)
+    {
+        int upper=CLAW_FIRST_FINGER+2*finger;
+        float azimuth=glm::pi<float>()+CLAW_AZIMUTH_STEP*finger;
+        glm::vec3 axis(-glm::sin(azimuth),0,glm::cos(azimuth));
+        boxes[upper].animation=glm::rotate(glm::mat4(1),glm::radians(jawAngle-CLAW_CLOSED_ANGLE),axis);
+    }
+
+    switch(phase)
+    {
+    case Phase::Ready:
+    {
+        // 키를 누르는 동안만 천장 이동부에 짧은 Move를 적용합니다.
+        glm::vec3 direction(0);
+        if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)direction.x+=1;
+        if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)direction.x-=1;
+        if(glfwGetKey(window,GLFW_KEY_UP)==GLFW_PRESS)direction.z+=1;
+        if(glfwGetKey(window,GLFW_KEY_DOWN)==GLFW_PRESS)direction.z-=1;
+        if(glm::length(direction)==0)break;
+        glm::vec3 center(boxes[CLAW_HEAD].model[3]);
+        glm::vec3 end=center+glm::normalize(direction)*CLAW_MOVE_SPEED*dt;
+        float halfX=FLOOR_WIDTH*.5f-CLAW_EDGE_MARGIN;
+        float halfZ=FLOOR_DEPTH*.5f-CLAW_EDGE_MARGIN;
+        end.x=glm::clamp(end.x,-halfX,halfX);
+        end.z=glm::clamp(end.z,-halfZ,halfZ);
+        auto move=Move(CLAW_HEAD,end-center,dt);
+        Advance(move,dt);
+        break;
+    }
+    case Phase::Grabbing:
+    {
+        if(!IsFinished(job) || phaseTime<CLAW_LOWER_SECONDS+CLAW_CLOSE_SECONDS)break;
+        EvaluateHierarchy();
+
+        // 집게 기준 범위 안에서 가장 가운데에 있는 큐브 하나를 붙입니다.
+        glm::mat4 toGrip=glm::inverse(boxes[CLAW_BODY].world);
+        glm::vec3 gripPoint(0);
+        float closest=1e10f;
+        for(int id=PRIZE_FIRST;id<PRIZE_FIRST+PRIZE_COUNT;++id)
+        {
+            glm::vec3 local=glm::vec3(toGrip*boxes[id].world[3])*boxes[CLAW_BODY].baseSize;
+            float distance=local.x*local.x+local.z*local.z;
+            bool inGrip=CLAW_COUNT==2 ? glm::abs(local.x)<=.13f && glm::abs(local.z)<=.16f
+                : distance<=.14f*.14f;
+            float fingerLength=CLAW_FIRST_LENGTH+(CLAW_SEGMENT_COUNT==2 ? CLAW_LOWER_LENGTH : 0.0f);
+            if(!inGrip || local.y<-fingerLength || local.y>-.16f)continue;
+            if(distance>=closest)continue;
+            closest=distance;heldPrize=id;gripPoint=local;
+        }
+        if(heldPrize>=0)
+            Attach(CLAW_BODY,heldPrize,Point(gripPoint.x,gripPoint.y,gripPoint.z),
+                Pivot::Center,Orientation::KeepWorld);
+
+        glm::vec3 center(boxes[CLAW_HEAD].model[3]);
+        glm::vec3 delta=glm::vec3(CLAW_DROP_X,center.y,CLAW_DROP_Z)-center;
+        float travelSeconds=glm::max(.25f,glm::length(delta)/CLAW_MOVE_SPEED);
+
+        // 상승 → 구석 이동 → 관성이 잦아드는 동안 대기
+        job=Run(Sequence({
+            Scale(CLAW_ROD,Axis::Y,1/rodExtension-1,Pivot::Top,CLAW_LIFT_SECONDS),
+            Move(CLAW_HEAD,delta,travelSeconds),
+            Move(CLAW_HEAD,{0,0,0},CLAW_SETTLE_SECONDS)
+        }));
+        phase=Phase::Delivering;
+        break;
+    }
+    case Phase::Delivering:
+        if(!IsFinished(job))break;
+        phaseTime=0;
+        phase=Phase::Opening;
+        break;
+    case Phase::Opening:
+    {
+        if(phaseTime<CLAW_RELEASE_SECONDS)break;
+        if(heldPrize<0)
+        {
+            phase=Phase::Ready;
+            break;
+        }
+        EvaluateHierarchy();
+
+        // 현재 자세에서 부모를 해제하고 아래의 바닥 또는 큐브의 높이를 구합니다.
+        auto& prize=boxes[heldPrize];
+        prize.model=prize.world;
+        prize.parent=-1;
+        prize.attachment={};
+        glm::vec3 center(prize.model[3]);
+        landingY=PRIZE_SIZE*.5f;
+        for(int id=PRIZE_FIRST;id<PRIZE_FIRST+PRIZE_COUNT;++id)
+        {
+            if(id==heldPrize)continue;
+            glm::vec3 other(boxes[id].world[3]);
+            if(glm::abs(other.x-center.x)<PRIZE_SIZE && glm::abs(other.z-center.z)<PRIZE_SIZE
+                && other.y<center.y)
+                landingY=glm::max(landingY,other.y+PRIZE_SIZE);
+        }
+        fallSpeed=0;
+        phase=Phase::Dropping;
+        break;
+    }
+    case Phase::Dropping:
+    {
+        // model의 4번째 열은 이동 성분입니다. Y만 갱신해 제자리에서 떨어뜨립니다.
+        fallSpeed+=PRIZE_GRAVITY*dt;
+        auto& height=boxes[heldPrize].model[3].y;
+        height=glm::max(landingY,height-fallSpeed*dt);
+        if(height<=landingY)
+        {
+            heldPrize=-1;
+            phase=Phase::Ready;
+        }
+        break;
+    }
+    }
 }
 
 void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
@@ -2495,7 +2495,7 @@ void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
         int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
         cameraOrbit=cameraOrbit==direction ? 0 : direction;
     }
-    try { CustomKey(key); }
+    try { CustomKey(window,key); }
     catch(const exception& error) { cerr << "Command error: " << error.what() << endl; }
 }
 
@@ -2557,4 +2557,560 @@ bool InitShader()
 	colorLocation = glGetUniformLocation(programID, "uColor");
 	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
 }
+#elif MID_TEST_EXAMPLE == 2
+// 중간대비1 그네 예제 원본
+#include <GL/glew.h>
+#include <GL/glfw3.h>
+#include <GL/glm/glm.hpp>
+#include <GL/glm/ext.hpp>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+using namespace std;
+
+// ============================================================================
+// 1. 프로그램 설정: 크기는 전체 길이, 회전각은 도 단위입니다.
+// ============================================================================
+#define WINDOW_WIDTH 1200
+#define WINDOW_HEIGHT 1200
+#define FLOOR_WIDTH 4.0f
+#define FLOOR_DEPTH 4.0f
+#define FLOOR_HEIGHT .04f
+#define SUPPORT_SPACING 2.30f
+#define SUPPORT_DEPTH 1.20f
+#define SUPPORT_HEIGHT 2.30f
+#define SUPPORT_THICKNESS .12f
+#define BEAM_THICKNESS .14f
+#define ROPE_LENGTH 1.55f
+#define ROPE_THICKNESS .025f
+#define ROPE_SPACING .62f
+#define SEAT_WIDTH .80f
+#define SEAT_DEPTH .38f
+#define SEAT_THICKNESS .055f
+#define PERSON_ENABLED 1 // 0: 사람 숨김, 1: 사람 표시
+#define BODY_WIDTH .30f
+#define BODY_HEIGHT .44f
+#define BODY_DEPTH .18f
+#define HEAD_SIZE .24f
+#define ARM_WIDTH .09f
+#define ARM_LENGTH .38f
+#define LEG_WIDTH .11f
+#define LEG_LENGTH .43f
+#define LIMB_GAP .035f
+#define ARM_SPREAD_ANGLE 10.0f
+#define LEG_SPREAD_ANGLE 9.0f
+
+// 흔들림 범위는 -진폭~+진폭입니다. 시작 자세와 초기 진폭은 별개입니다.
+#define SWING_START_ANGLE 0.0f
+#define SWING_INITIAL_AMPLITUDE 25.0f
+#define SWING_MIN_AMPLITUDE 5.0f
+#define SWING_MAX_AMPLITUDE 45.0f
+#define SWING_AMPLITUDE_STEP 5.0f
+#define SWING_AMPLITUDE_CHANGE_SPEED 15.0f
+// 속도는 사인 함수 위상이 1초에 진행하는 각도입니다. 60이면 한 왕복에 6초입니다.
+#define SWING_INITIAL_SPEED 60.0f
+#define SWING_MIN_SPEED 15.0f
+#define SWING_MAX_SPEED 150.0f
+#define SWING_SPEED_STEP 15.0f
+#define KEY_SWING GLFW_KEY_G
+#define KEY_HEIGHT GLFW_KEY_H
+#define KEY_BOARD GLFW_KEY_B
+#define SUPPORT_SCALE_MIN 1.0f
+#define SUPPORT_SCALE_MAX 1.5f
+#define SUPPORT_SCALE_SPEED .20f
+#define SWING_MOVE_SPEED .70f
+#define WALK_SPEED .65f
+#define WALK_SPEED_MIN .20f
+#define WALK_SPEED_MAX 1.30f
+#define WALK_SPEED_STEP .10f
+#define WALK_ANGLE 25.0f
+#define WALK_PHASE_PER_DISTANCE 10.0f
+#define PERSON_RADIUS .27f
+#define SIMULATION_FPS 240
+#define KEY_ANGLE_DOWN GLFW_KEY_O
+#define KEY_ANGLE_UP GLFW_KEY_P
+#define KEY_SPEED_UP GLFW_KEY_EQUAL // 일반 키보드 +/= 키
+#define KEY_SPEED_DOWN GLFW_KEY_MINUS
+#define KEY_RESET GLFW_KEY_C
+
+#define CAMERA_X 3.2f
+#define CAMERA_Y 2.6f
+#define CAMERA_Z -4.5f
+#define CAMERA_TARGET_X 0.0f
+#define CAMERA_TARGET_Y 1.1f
+#define CAMERA_TARGET_Z 0.0f
+#define CAMERA_MOVE_SPEED 1.0f
+#define CAMERA_ROTATE_SPEED 35.0f
+#define CAMERA_RADIUS_MIN .30f
+#define CAMERA_RADIUS_MAX 20.0f
+#define ZOOM_STEP .05f
+#define ORBIT_ENABLED 1 // 0: 마우스 오비트 사용 안 함, 1: 사용
+#define ORBIT_DEGREES 720.0f
+#define ORBIT_PITCH_LIMIT 89.0f
+#define PERSPECTIVE_FOVY 45.0f
+#define PERSPECTIVE_NEAR .1f
+#define PERSPECTIVE_FAR 100.0f
+
+static_assert(SWING_MIN_AMPLITUDE>0 && SWING_INITIAL_AMPLITUDE>=SWING_MIN_AMPLITUDE
+    && SWING_INITIAL_AMPLITUDE<=SWING_MAX_AMPLITUDE,"Check swing amplitude settings");
+static_assert(SWING_START_ANGLE>=-SWING_INITIAL_AMPLITUDE && SWING_START_ANGLE<=SWING_INITIAL_AMPLITUDE,
+    "Start angle must be within initial amplitude");
+static_assert(SWING_MIN_SPEED>0 && SWING_INITIAL_SPEED>=SWING_MIN_SPEED
+    && SWING_INITIAL_SPEED<=SWING_MAX_SPEED,"Check swing speed settings");
+
+// ============================================================================
+// 2. 상태: 그네 전체가 하나의 회전행렬을 공유합니다.
+// ============================================================================
+float swingPhase=0, swingAngle=SWING_START_ANGLE;
+float amplitude=SWING_INITIAL_AMPLITUDE, targetAmplitude=SWING_INITIAL_AMPLITUDE;
+float swingSpeed=SWING_INITIAL_SPEED;
+bool swinging=false,dragging=false;
+bool riding=true,boardingPending=false,walking=false,heightChanging=false;
+float supportScale=1,scaleDirection=1,walkSpeed=WALK_SPEED,walkPhase=0;
+glm::vec3 swingPosition(0),personPosition(0),walkDirection(0,0,-1);
+double simulationTime=0;
+struct Part { glm::mat4 model; glm::vec3 size,color; };
+int cameraOrbit=0;
+glm::vec3 cameraPosition(CAMERA_X,CAMERA_Y,CAMERA_Z);
+glm::vec3 cameraTarget(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
+const glm::vec3 orbitCenter(CAMERA_TARGET_X,CAMERA_TARGET_Y,CAMERA_TARGET_Z);
+double previousMouseX=0,previousMouseY=0;
+GLuint programID=0,vao=0,vbo=0;
+GLint modelLocation,viewLocation,projectionLocation,colorLocation;
+string ReadFile(const char* name);
+bool InitShader();
+void ResetScene();
+vector<Part> SwingParts(glm::vec3 position);
+glm::mat4 SeatMatrix();
+bool PersonBlocked(glm::vec3 position,glm::vec3 framePosition);
+void CompleteBoarding();
+void UpdateScene(GLFWwindow* window,float dt);
+void DrawBox(const glm::mat4& model,glm::vec3 size,glm::vec3 color);
+void DrawScene(int width,int height);
+void KeyCallback(GLFWwindow*,int,int,int,int);
+void MouseCallback(GLFWwindow*,int,int,int);
+void CursorCallback(GLFWwindow*,double,double);
+void ScrollCallback(GLFWwindow*,double,double);
+
+// ============================================================================
+// 3. 초기화와 메인 반복문
+// ============================================================================
+int main()
+{
+	if (!glfwInit())return -1;
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Midterm 1 - Swing", nullptr, nullptr);
+	if (!window) { glfwTerminate(); return -1; }
+	glfwMakeContextCurrent(window); glewExperimental = GL_TRUE;
+	if (glewInit() != GLEW_OK || !InitShader()) { glfwDestroyWindow(window); glfwTerminate(); return -1; }
+	glfwSwapInterval(1); glEnable(GL_DEPTH_TEST);
+	glfwSetKeyCallback(window, KeyCallback); glfwSetMouseButtonCallback(window, MouseCallback);
+	glfwSetCursorPosCallback(window, CursorCallback); glfwSetScrollCallback(window, ScrollCallback);
+	glm::vec3 corners[] = { {-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f},
+		{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f} };
+	int indices[] = { 0,2,1,0,3,2, 4,5,6,4,6,7, 0,4,7,0,7,3,
+		1,2,6,1,6,5, 3,7,6,3,6,2, 0,1,5,0,5,4 };
+	vector<glm::vec3> vertices;
+	for (int index : indices)vertices.push_back(corners[index]);
+	glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo); glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr); glEnableVertexAttribArray(0); glBindVertexArray(0);
+    ResetScene();
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    cout << "G: swing | H: height | B: board/exit | WASD: walk | arrows: move swing\n"
+         << "O/P: amplitude -/+ | +/-: both speeds | C: reset\n"
+         << "x/X,z/Z: camera | y/Y: orbit | drag/wheel: camera | q: quit" << endl;
+	double previousTime = glfwGetTime();
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents(); double now = glfwGetTime(); float dt = (float)glm::min(now - previousTime, 0.1); previousTime = now;
+		UpdateScene(window, dt);
+		int width, height; glfwGetFramebufferSize(window, &width, &height);
+		DrawScene(width, height); glfwSwapBuffers(window);
+	}
+	glDeleteBuffers(1, &vbo); glDeleteVertexArrays(1, &vao); glDeleteProgram(programID);
+	glfwDestroyWindow(window); glfwTerminate(); return 0;
+}
+
+// ResetScene: 그네의 자세·설정·정지 상태와 카메라를 초기화합니다.
+void ResetScene()
+{
+    amplitude=targetAmplitude=SWING_INITIAL_AMPLITUDE;
+    swingSpeed=SWING_INITIAL_SPEED;
+    swingPhase=glm::asin(SWING_START_ANGLE/SWING_INITIAL_AMPLITUDE);
+    swingAngle=SWING_START_ANGLE;
+    swinging=dragging=false;
+    riding=true;boardingPending=walking=heightChanging=false;
+    supportScale=scaleDirection=1;
+    walkSpeed=WALK_SPEED;walkPhase=0;simulationTime=0;
+    swingPosition=personPosition=glm::vec3(0);walkDirection={0,0,-1};
+    cameraOrbit=0;
+    cameraPosition={CAMERA_X,CAMERA_Y,CAMERA_Z};
+    cameraTarget=orbitCenter;
+}
+
+// SeatMatrix: 좌석 윗면 기준 행렬. 기둥 높이와 전체 이동을 함께 반영합니다.
+glm::mat4 SeatMatrix()
+{
+    glm::mat4 frame=glm::translate(glm::mat4(1),swingPosition+glm::vec3(0,SUPPORT_HEIGHT*supportScale,0));
+    frame=glm::rotate(frame,glm::radians(swingAngle),glm::vec3(1,0,0));
+    return glm::translate(frame,{0,-ROPE_LENGTH,0});
+}
+
+// SwingParts: 그리기와 충돌 검사가 같은 기둥/가로봉/줄/좌석 정보를 사용합니다.
+vector<Part> SwingParts(glm::vec3 position)
+{
+    vector<Part> parts;
+    glm::mat4 world=glm::translate(glm::mat4(1),position);
+    float height=SUPPORT_HEIGHT*supportScale;
+    glm::vec3 wood(.55f,.30f,.16f);
+    for(float side:{-1.0f,1.0f})
+    {
+        for(float front:{-1.0f,1.0f})
+            parts.push_back({glm::translate(world,{side*SUPPORT_SPACING*.5f,height*.5f,front*SUPPORT_DEPTH*.5f}),
+                {SUPPORT_THICKNESS,height,SUPPORT_THICKNESS},wood});
+        parts.push_back({glm::translate(world,{side*SUPPORT_SPACING*.5f,height,0}),
+            {SUPPORT_THICKNESS,SUPPORT_THICKNESS,SUPPORT_DEPTH+SUPPORT_THICKNESS},wood});
+    }
+    parts.push_back({glm::translate(world,{0,height,0}),
+        {SUPPORT_SPACING-SUPPORT_THICKNESS,BEAM_THICKNESS,BEAM_THICKNESS},{.65f,.38f,.18f}});
+    glm::mat4 swing=glm::rotate(glm::translate(world,{0,height,0}),glm::radians(swingAngle),glm::vec3(1,0,0));
+    for(float side:{-1.0f,1.0f})
+        parts.push_back({glm::translate(swing,{side*ROPE_SPACING*.5f,-ROPE_LENGTH*.5f,0}),
+            {ROPE_THICKNESS,ROPE_LENGTH,ROPE_THICKNESS},{.25f,.25f,.28f}});
+    parts.push_back({glm::translate(swing,{0,-ROPE_LENGTH-SEAT_THICKNESS*.5f,0}),
+        {SEAT_WIDTH,SEAT_THICKNESS,SEAT_DEPTH},{.80f,.55f,.20f}});
+    return parts;
+}
+
+// PersonBlocked: 서 있는 사람의 범위와 각 부품의 변환된 AABB를 비교합니다.
+bool PersonBlocked(glm::vec3 position,glm::vec3 framePosition)
+{
+    if(glm::abs(position.x)>FLOOR_WIDTH*.5f-PERSON_RADIUS
+        || glm::abs(position.z)>FLOOR_DEPTH*.5f-PERSON_RADIUS)return true;
+    float personHeight=LEG_LENGTH+BODY_HEIGHT+HEAD_SIZE;
+    for(const auto& part:SwingParts(framePosition))
+    {
+        glm::mat4 model=glm::scale(part.model,part.size);
+        glm::vec3 low(1e10f),high(-1e10f);
+        for(float x:{-.5f,.5f})for(float y:{-.5f,.5f})for(float z:{-.5f,.5f})
+        {
+            glm::vec3 point(model*glm::vec4(x,y,z,1));
+            low=glm::min(low,point);high=glm::max(high,point);
+        }
+        if(low.y<personHeight && high.y>0
+            && position.x+PERSON_RADIUS>low.x && position.x-PERSON_RADIUS<high.x
+            && position.z+PERSON_RADIUS>low.z && position.z-PERSON_RADIUS<high.z)return true;
+    }
+    return false;
+}
+
+// CompleteBoarding: 중앙에서 순간이동으로 자세를 전환합니다. 하차 지점은 충돌 없는 바닥입니다.
+void CompleteBoarding()
+{
+    if(!riding)
+        riding=true;
+    else
+    {
+        glm::vec3 candidate=swingPosition+glm::vec3(0,0,-SEAT_DEPTH*.5f-PERSON_RADIUS-.15f);
+        bool found=!PersonBlocked(candidate,swingPosition);
+        // 이동한 그네 앞에 공간이 부족하면 가까운 빈 바닥 위치를 찾습니다.
+        float best=1e10f;
+        if(!found)
+            for(float x=-FLOOR_WIDTH*.5f+PERSON_RADIUS;x<=FLOOR_WIDTH*.5f-PERSON_RADIUS;x+=.1f)
+                for(float z=-FLOOR_DEPTH*.5f+PERSON_RADIUS;z<=FLOOR_DEPTH*.5f-PERSON_RADIUS;z+=.1f)
+                {
+                    glm::vec3 point(x,0,z);
+                    float distance=glm::length(point-swingPosition);
+                    if(distance<best && !PersonBlocked(point,swingPosition))
+                    {
+                        candidate=point;best=distance;found=true;
+                    }
+                }
+        if(!found)
+        {
+            cerr << "No free floor position for dismount." << endl;
+            boardingPending=false;
+            return;
+        }
+        personPosition=candidate;riding=false;
+    }
+    boardingPending=false;walking=false;walkPhase=0;walkDirection={0,0,-1};
+}
+
+// ============================================================================
+// 4. 애니메이션과 카메라 이동
+// ============================================================================
+void UpdateScene(GLFWwindow* window,float dt)
+{
+    simulationTime+=dt;
+    const float step=1.0f/SIMULATION_FPS;
+    while(simulationTime>=step)
+    {
+        simulationTime-=step;
+        if(heightChanging)
+        {
+            supportScale+=scaleDirection*SUPPORT_SCALE_SPEED*step;
+            if(supportScale>=SUPPORT_SCALE_MAX){supportScale=SUPPORT_SCALE_MAX;scaleDirection=-1;}
+            if(supportScale<=SUPPORT_SCALE_MIN){supportScale=SUPPORT_SCALE_MIN;scaleDirection=1;}
+        }
+        if(swinging)
+        {
+            amplitude+=glm::clamp(targetAmplitude-amplitude,
+                -SWING_AMPLITUDE_CHANGE_SPEED*step,SWING_AMPLITUDE_CHANGE_SPEED*step);
+            float nextPhase=swingPhase+glm::radians(swingSpeed)*step;
+            bool crossed=glm::floor(nextPhase/glm::pi<float>())>glm::floor(swingPhase/glm::pi<float>());
+            if(boardingPending && crossed)
+            {
+                swingPhase=glm::mod(glm::floor(nextPhase/glm::pi<float>())*glm::pi<float>(),glm::two_pi<float>());
+                swingAngle=0;swinging=false;
+                CompleteBoarding();
+            }
+            else
+            {
+                swingPhase=glm::mod(nextPhase,glm::two_pi<float>());
+                swingAngle=amplitude*glm::sin(swingPhase);
+            }
+        }
+        glm::vec3 movement(0);
+        if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)movement.x-=1;
+        if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)movement.x+=1;
+        if(glfwGetKey(window,GLFW_KEY_UP)==GLFW_PRESS)movement.z-=1;
+        if(glfwGetKey(window,GLFW_KEY_DOWN)==GLFW_PRESS)movement.z+=1;
+        if(glm::length(movement)>0)
+        {
+            glm::vec3 candidate=swingPosition+glm::normalize(movement)*SWING_MOVE_SPEED*step;
+            // 최대 흔들림과 탑승자의 앞으로 뻗은 다리까지 고려해 경계를 제한합니다.
+            float extentX=(SUPPORT_SPACING+SUPPORT_THICKNESS)*.5f;
+            float extentZ=glm::max((SUPPORT_DEPTH+SUPPORT_THICKNESS)*.5f,
+                ROPE_LENGTH*glm::sin(glm::radians(SWING_MAX_AMPLITUDE))+LEG_LENGTH+BODY_DEPTH);
+            candidate.x=glm::clamp(candidate.x,-glm::max(0.0f,FLOOR_WIDTH*.5f-extentX),glm::max(0.0f,FLOOR_WIDTH*.5f-extentX));
+            candidate.z=glm::clamp(candidate.z,-glm::max(0.0f,FLOOR_DEPTH*.5f-extentZ),glm::max(0.0f,FLOOR_DEPTH*.5f-extentZ));
+            if(!PERSON_ENABLED || riding || !PersonBlocked(personPosition,candidate))
+                swingPosition=candidate;
+        }
+        if(PERSON_ENABLED && !riding && walking)
+        {
+            walkPhase=glm::mod(walkPhase+walkSpeed*WALK_PHASE_PER_DISTANCE*step,glm::two_pi<float>());
+            glm::vec3 candidate=personPosition+walkDirection*walkSpeed*step;
+            if(PersonBlocked(candidate,swingPosition))
+                walkDirection=-walkDirection;
+            else
+                personPosition=candidate;
+        }
+    }
+    bool shift=glfwGetKey(window,GLFW_KEY_LEFT_SHIFT)==GLFW_PRESS
+        || glfwGetKey(window,GLFW_KEY_RIGHT_SHIFT)==GLFW_PRESS;
+    float sign=shift ? -1.0f : 1.0f;
+    glm::vec3 movement(0);
+    if(glfwGetKey(window,GLFW_KEY_X)==GLFW_PRESS)movement.x=sign;
+    if(glfwGetKey(window,GLFW_KEY_Z)==GLFW_PRESS)movement.z=sign;
+    if(glm::length(movement)>0)
+    {
+        movement=glm::normalize(movement)*CAMERA_MOVE_SPEED*dt;
+        cameraPosition+=movement;
+        cameraTarget+=movement;
+    }
+    if(cameraOrbit)
+    {
+        glm::mat4 rotation=glm::rotate(glm::mat4(1),glm::radians(cameraOrbit*CAMERA_ROTATE_SPEED*dt),glm::vec3(0,1,0));
+        glm::vec3 center=orbitCenter+swingPosition;
+        cameraPosition=center+glm::vec3(rotation*glm::vec4(cameraPosition-center,0));
+        cameraTarget=center+glm::vec3(rotation*glm::vec4(cameraTarget-center,0));
+    }
+}
+
+// ============================================================================
+// 5. 그리기: 기둥 → 그네 회전축 → 좌석 → 사람 순서로 행렬을 연결합니다.
+// ============================================================================
+// DrawBox: 중심을 기준으로 하는 단위 육면체에 크기·행렬·색상을 적용합니다.
+void DrawBox(const glm::mat4& model,glm::vec3 size,glm::vec3 color)
+{
+    glm::mat4 transform=glm::scale(model,size);
+    glUniformMatrix4fv(modelLocation,1,GL_FALSE,glm::value_ptr(transform));
+    glUniform3fv(colorLocation,1,glm::value_ptr(color));
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES,0,36);
+}
+
+void DrawScene(int width,int height)
+{
+    if(width<=0 || height<=0)return;
+    glViewport(0,0,width,height);
+    glClearColor(1,1,1,1);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glUseProgram(programID);
+    glm::mat4 view=glm::lookAt(cameraPosition,cameraTarget,glm::vec3(0,1,0));
+    glm::mat4 projection=glm::perspective(glm::radians(PERSPECTIVE_FOVY),(float)width/height,PERSPECTIVE_NEAR,PERSPECTIVE_FAR);
+    glUniformMatrix4fv(viewLocation,1,GL_FALSE,glm::value_ptr(view));
+    glUniformMatrix4fv(projectionLocation,1,GL_FALSE,glm::value_ptr(projection));
+    glm::mat4 world(1);
+    DrawBox(glm::translate(world,{0,-FLOOR_HEIGHT*.5f,0}),
+        {FLOOR_WIDTH,FLOOR_HEIGHT,FLOOR_DEPTH},{.82f,.88f,.94f});
+    for(const auto& part:SwingParts(swingPosition))
+        DrawBox(part.model,part.size,part.color);
+    glm::mat4 seat=SeatMatrix();
+
+    if(PERSON_ENABLED)
+    {
+        // seat 원점이 의자 윗면입니다. 몸통의 하부를 이 위치에 고정합니다.
+        glm::mat4 person=seat;
+        if(!riding)
+        {
+            person=glm::translate(glm::mat4(1),personPosition+glm::vec3(0,LEG_LENGTH,0));
+            person=glm::rotate(person,glm::atan(-walkDirection.x,-walkDirection.z),glm::vec3(0,1,0));
+        }
+        float walkAngle=!riding && walking ? glm::radians(WALK_ANGLE)*glm::sin(walkPhase) : 0;
+        DrawBox(glm::translate(person,{0,BODY_HEIGHT*.5f,0}),
+            {BODY_WIDTH,BODY_HEIGHT,BODY_DEPTH},{.10f,.65f,.72f});
+        DrawBox(glm::translate(person,{0,BODY_HEIGHT+HEAD_SIZE*.5f,0}),
+            glm::vec3(HEAD_SIZE),{.78f,.58f,.40f});
+        // 앞은 -Z입니다. 작은 눈 두 개도 얇은 육면체로 만듭니다.
+        for(float side:{-1.0f,1.0f})
+        {
+            DrawBox(glm::translate(person,{side*HEAD_SIZE*.22f,BODY_HEIGHT+HEAD_SIZE*.55f,-HEAD_SIZE*.5f-.005f}),
+                {HEAD_SIZE*.16f,HEAD_SIZE*.13f,.012f},{.15f,.15f,.20f});
+            if(riding)
+            {
+                glm::mat4 leg=glm::translate(person,{side*(LEG_WIDTH+LIMB_GAP)*.5f,LEG_WIDTH*.5f,-BODY_DEPTH*.25f});
+                leg=glm::rotate(leg,glm::radians(-side*LEG_SPREAD_ANGLE),glm::vec3(0,1,0));
+                DrawBox(glm::translate(leg,{0,0,-LEG_LENGTH*.5f}),
+                    {LEG_WIDTH,LEG_WIDTH,LEG_LENGTH},{.25f,.25f,.65f});
+            }
+            else
+            {
+                glm::mat4 leg=glm::translate(person,{side*(LEG_WIDTH+LIMB_GAP)*.5f,0,0});
+                leg=glm::rotate(leg,side*walkAngle,glm::vec3(1,0,0));
+                DrawBox(glm::translate(leg,{0,-LEG_LENGTH*.5f,0}),
+                    {LEG_WIDTH,LEG_LENGTH,LEG_WIDTH},{.25f,.25f,.65f});
+            }
+            // 팔은 어깨 옆에서 아래로 내려오며 Z축으로 벌립니다.
+            glm::mat4 arm=glm::translate(person,{side*(BODY_WIDTH*.5f+ARM_WIDTH*.5f+LIMB_GAP),BODY_HEIGHT,0});
+            arm=glm::rotate(arm,glm::radians(side*ARM_SPREAD_ANGLE),glm::vec3(0,0,1));
+            arm=glm::rotate(arm,-side*walkAngle,glm::vec3(1,0,0));
+            DrawBox(glm::translate(arm,{0,-ARM_LENGTH*.5f,0}),
+                {ARM_WIDTH,ARM_LENGTH,ARM_WIDTH},{.78f,.58f,.40f});
+        }
+    }
+    glBindVertexArray(0);
+}
+
+// ============================================================================
+// 6. 키보드와 마우스
+// ============================================================================
+void KeyCallback(GLFWwindow* window,int key,int,int action,int mods)
+{
+    if(action!=GLFW_PRESS)return;
+    if(key==GLFW_KEY_Q || key==GLFW_KEY_ESCAPE)glfwSetWindowShouldClose(window,true);
+    if(key==KEY_SWING && !boardingPending)swinging=!swinging;
+    if(key==KEY_HEIGHT)heightChanging=!heightChanging;
+    if(key==KEY_BOARD && PERSON_ENABLED && !boardingPending)
+    {
+        boardingPending=true;
+        if(glm::abs(swingAngle)<.001f)
+        {
+            swingAngle=0;swinging=false;
+            CompleteBoarding();
+        }
+        else
+            swinging=true; // 중간 각도에서 일시정지했어도 중앙까지 이동합니다.
+    }
+    if(!riding && PERSON_ENABLED)
+    {
+        if(key==GLFW_KEY_W){walkDirection={0,0,-1};walking=true;}
+        if(key==GLFW_KEY_S){walkDirection={0,0,1};walking=true;}
+        if(key==GLFW_KEY_A){walkDirection={-1,0,0};walking=true;}
+        if(key==GLFW_KEY_D){walkDirection={1,0,0};walking=true;}
+    }
+    if(key==KEY_ANGLE_DOWN)targetAmplitude=glm::max(targetAmplitude-SWING_AMPLITUDE_STEP,SWING_MIN_AMPLITUDE);
+    if(key==KEY_ANGLE_UP)targetAmplitude=glm::min(targetAmplitude+SWING_AMPLITUDE_STEP,SWING_MAX_AMPLITUDE);
+    if(key==KEY_SPEED_UP || key==GLFW_KEY_KP_ADD)
+    {
+        swingSpeed=glm::min(swingSpeed+SWING_SPEED_STEP,SWING_MAX_SPEED);
+        walkSpeed=glm::min(walkSpeed+WALK_SPEED_STEP,WALK_SPEED_MAX);
+    }
+    if(key==KEY_SPEED_DOWN || key==GLFW_KEY_KP_SUBTRACT)
+    {
+        swingSpeed=glm::max(swingSpeed-SWING_SPEED_STEP,SWING_MIN_SPEED);
+        walkSpeed=glm::max(walkSpeed-WALK_SPEED_STEP,WALK_SPEED_MIN);
+    }
+    if(key==GLFW_KEY_Y)
+    {
+        int direction=(mods&GLFW_MOD_SHIFT) ? 1 : -1;
+        cameraOrbit=cameraOrbit==direction ? 0 : direction;
+    }
+    if(key==KEY_RESET)ResetScene();
+    if(key==KEY_ANGLE_DOWN || key==KEY_ANGLE_UP || key==KEY_SPEED_DOWN || key==KEY_SPEED_UP
+        || key==GLFW_KEY_KP_ADD || key==GLFW_KEY_KP_SUBTRACT)
+        cout << "Amplitude: +/-" << targetAmplitude << " deg | Phase speed: " << swingSpeed << " deg/s | Walk speed: " << walkSpeed << endl;
+}
+
+void MouseCallback(GLFWwindow* window,int button,int action,int)
+{
+    if(button!=GLFW_MOUSE_BUTTON_LEFT)return;
+    dragging=ORBIT_ENABLED && action==GLFW_PRESS;
+    if(dragging)glfwGetCursorPos(window,&previousMouseX,&previousMouseY);
+}
+
+void CursorCallback(GLFWwindow* window,double x,double y)
+{
+    if(!dragging)return;
+    int width,height;
+    glfwGetWindowSize(window,&width,&height);
+    if(width<=0 || height<=0)return;
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::length(offset);
+    float yaw=glm::atan(offset.x,offset.z);
+    float pitch=glm::asin(glm::clamp(offset.y/radius,-1.0f,1.0f));
+    yaw-=glm::radians(ORBIT_DEGREES)*(float)(x-previousMouseX)/width;
+    pitch+=glm::radians(ORBIT_DEGREES)*(float)(y-previousMouseY)/height;
+    pitch=glm::clamp(pitch,-glm::radians(ORBIT_PITCH_LIMIT),glm::radians(ORBIT_PITCH_LIMIT));
+    cameraPosition=cameraTarget+radius*glm::vec3(glm::cos(pitch)*glm::sin(yaw),glm::sin(pitch),glm::cos(pitch)*glm::cos(yaw));
+    previousMouseX=x;
+    previousMouseY=y;
+}
+
+void ScrollCallback(GLFWwindow*,double,double yoffset)
+{
+    glm::vec3 offset=cameraPosition-cameraTarget;
+    float radius=glm::clamp(glm::length(offset)-(float)yoffset*ZOOM_STEP,CAMERA_RADIUS_MIN,CAMERA_RADIUS_MAX);
+    cameraPosition=cameraTarget+glm::normalize(offset)*radius;
+}
+
+// ============================================================================
+// 7. 셰이더 파일 읽기와 컴파일
+// ============================================================================
+string ReadFile(const char* name)
+{
+	ifstream file(name);
+	if (!file) { cerr << "Cannot open shader: " << name << endl; return ""; }
+	stringstream stream; stream << file.rdbuf(); return stream.str();
+}
+
+bool InitShader()
+{
+	string sources[2] = { ReadFile("vertex.glsl"), ReadFile("fragment.glsl") };
+	if (sources[0].empty() || sources[1].empty()) return false;
+	GLuint shaders[2] = { glCreateShader(GL_VERTEX_SHADER), glCreateShader(GL_FRAGMENT_SHADER) };
+	for (int i = 0; i < 2; ++i) {
+		const char* code = sources[i].c_str(); glShaderSource(shaders[i], 1, &code, nullptr);
+		glCompileShader(shaders[i]); GLint ok; glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &ok);
+		if (!ok) { char log[1024]; glGetShaderInfoLog(shaders[i], 1024, nullptr, log); cerr << log << endl; return false; }
+	}
+	programID = glCreateProgram();
+	glAttachShader(programID, shaders[0]); glAttachShader(programID, shaders[1]); glLinkProgram(programID);
+	GLint ok; glGetProgramiv(programID, GL_LINK_STATUS, &ok);
+	if (!ok) { char log[1024]; glGetProgramInfoLog(programID, 1024, nullptr, log); cerr << log << endl; return false; }
+	glDeleteShader(shaders[0]); glDeleteShader(shaders[1]);
+	modelLocation = glGetUniformLocation(programID, "modelTransform");
+	viewLocation = glGetUniformLocation(programID, "viewTransform");
+	projectionLocation = glGetUniformLocation(programID, "projectionTransform");
+	colorLocation = glGetUniformLocation(programID, "uColor");
+	return modelLocation >= 0 && viewLocation >= 0 && projectionLocation >= 0 && colorLocation >= 0;
+}
+#else
+#error MID_TEST_EXAMPLE must be 0, 1, or 2
 #endif
