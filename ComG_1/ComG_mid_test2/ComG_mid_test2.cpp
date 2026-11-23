@@ -116,8 +116,6 @@ struct BoxSetting
     glm::vec3 size{.3f},center{0};
     Color color;
     glm::vec3 angles{0};
-    int parent=-1; // -1: 기존 독립 객체, 0~39: 부모 객체 번호
-    bool inheritScale=false; // false: 자기 크기 유지, true: 부모 신축도 상속
 };
 enum class Orientation { Inherit, KeepUpright, KeepWorld }; // 부모 회전 전체 / Y축 방향만 / 자식 자체 방향만
 struct Attachment
@@ -148,15 +146,10 @@ struct BoxState
 
 // ============================================================================
 // 수정 영역 ①: 번호 0~39의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
-// 마지막에 부모 번호와 신축 상속을 선택적으로 추가합니다. 생략하면 기존과 완전히 같습니다.
-// {true,{크기},{위치},색상,{각도},부모번호,신축상속}
-// 부모가 있으면 위치·Move·회전축·Point 좌표는 부모 중심 기준이며, 단위는 기존과 같은 길이입니다.
-// 부모 신축 시 위치는 함께 이동합니다. false이면 자식 크기는 유지하고 true이면 크기도 상속합니다.
-// 예: {true,{.3f,.5f,.2f},{0,.7f,0},Color::Random(),{0,0,0},-1,false}, // 몸통 0번
-// 예: {true,{.1f,.4f,.1f},{-.23f,0,0},Color::Random(),{0,0,0},0,false}, // 왼팔 1번
-// 이 예에서는 팔 윗면이 몸통 중심보다 .2 위에 있습니다. 상대 좌표로 부착 위치를 조정합니다.
-// 부모의 이동·회전은 모든 후손에게 전달됩니다. 자식 변환은 부모에 영향을 주지 않습니다.
-// 부모가 비활성화되면 자식도 숨깁니다. 자기 자신/순환 연결/범위 밖 부모 번호는 허용하지 않습니다.
+// {활성화,{크기},{위치},색상,{초기각도}}만 지정합니다.
+// 부모/자식 관계와 신축 상속은 ResetScene의 Attach에서 설정합니다.
+// 연결점 생략형 Attach에서는 위치가 부모 기준 상대 좌표입니다.
+// 연결점 지정형 Attach에서는 두 연결점이 맞닿도록 위치를 계산합니다.
 // true인 객체만 표시됩니다. 크기/좌표/색상은 아래 한 곳에서만 설정합니다.
 // 초기 회전각은 {X각,Y각,Z각}, 기본 {0,0,0}입니다. 크기는 양수로 지정합니다.
 // 색상 인자 예: { .9f,.2f,.2f } / Color::Random() / Color::Random(1)
@@ -196,14 +189,14 @@ const array<BoxSetting,BOX_COUNT> boxSettings={{
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 29번
     {false, {.30f,.30f,.30f}, {0,.15f,0}, {.25f,.65f,.85f}, {0,0,0}}, // 30번
     {true, {.26f,.32f,.16f}, {.9f,.48f,.8f}, {.15f,.65f,.80f}, {0,0,0}}, // 31 몸통
-    {true, {.075f,.30f,.075f}, {-.195f,0,0}, {.85f,.25f,.20f}, {0,0,0},31,false}, // 32 왼팔
-    {true, {.075f,.30f,.075f}, {.195f,0,0}, {.20f,.40f,.85f}, {0,0,0},31,false}, // 33 오른팔
-    {true, {.09f,.32f,.09f}, {-.065f,-.32f,0}, {.30f,.25f,.80f}, {0,0,0},31,false}, // 34 왼다리
-    {true, {.09f,.32f,.09f}, {.065f,-.32f,0}, {.65f,.20f,.70f}, {0,0,0},31,false}, // 35 오른다리
-    {true, {.20f,.20f,.20f}, {0,.26f,0}, {.85f,.70f,.50f}, {0,0,0},31,false}, // 36 머리
-    {true, {.045f,.045f,.055f}, {0,-.015f,-.1275f}, {.90f,.45f,.20f}, {0,0,0},36,false}, // 37 코
-    {true, {.035f,.025f,.012f}, {-.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0},36,false}, // 38 왼눈
-    {true, {.035f,.025f,.012f}, {.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0},36,false}, // 39 오른눈
+    {true, {.075f,.30f,.075f}, {-.195f,0,0}, {.85f,.25f,.20f}, {0,0,0}}, // 32 왼팔
+    {true, {.075f,.30f,.075f}, {.195f,0,0}, {.20f,.40f,.85f}, {0,0,0}}, // 33 오른팔
+    {true, {.09f,.32f,.09f}, {-.065f,-.32f,0}, {.30f,.25f,.80f}, {0,0,0}}, // 34 왼다리
+    {true, {.09f,.32f,.09f}, {.065f,-.32f,0}, {.65f,.20f,.70f}, {0,0,0}}, // 35 오른다리
+    {true, {.20f,.20f,.20f}, {0,.26f,0}, {.85f,.70f,.50f}, {0,0,0}}, // 36 머리
+    {true, {.045f,.045f,.055f}, {0,-.015f,-.1275f}, {.90f,.45f,.20f}, {0,0,0}}, // 37 코
+    {true, {.035f,.025f,.012f}, {-.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0}}, // 38 왼눈
+    {true, {.035f,.025f,.012f}, {.045f,.035f,-.106f}, {.12f,.12f,.18f}, {0,0,0}}, // 39 오른눈
 
 }};
 
@@ -244,11 +237,15 @@ double previousMouseX=0,previousMouseY=0,accumulator=0;
 GLuint programID=0,vao=0,vbo=0;
 GLint modelLocation,viewLocation,projectionLocation,colorLocation;
 
-// Attach(부모,자식,부모 연결점,자식 연결점,방향 상속).
+// 연결점 지정형: Attach(부모,자식,부모연결점,자식연결점,방향상속,신축상속).
+// 방향상속 기본값은 Orientation::Inherit, 신축상속 기본값은 false입니다.
+// false는 자식 크기 유지, true는 부모 신축 상속입니다. 연결 위치는 두 경우 모두 부모를 따릅니다.
+// 예: Attach(0,1,Pivot::Bottom,Pivot::Top,Orientation::Inherit,true);
+// 신축상속을 지정하려면 앞의 방향상속도 작성합니다. 부모 관계는 boxSettings에 쓰지 않습니다.
 // Pivot::Top/Bottom 등은 각 객체의 면 중심, Point(x,y,z)는 해당 객체 중심 기준 길이입니다.
 // 연결점이 맞닿도록 중심을 계산합니다. Move는 부모 기준 연결점 오프셋을 옮기고,
 // 자식 Rotate/Scale은 자신의 변환을 적용한 뒤 연결점을 다시 맞춥니다.
-void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation orientation=Orientation::Inherit)
+void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation orientation=Orientation::Inherit,bool inheritScale=false)
 {
     if(child<0 || child>=BOX_COUNT || parent<0 || parent>=BOX_COUNT)
         throw runtime_error("Attachment box ID must be 0~39");
@@ -260,13 +257,26 @@ void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation 
     }
     auto& box=boxes[child];
     box.parent=parent;
+    box.inheritScale=inheritScale;
     box.attachment={true,parentPoint,childPoint,orientation};
     box.followLag.sampled=false;
     box.followLag.trailingOffset=glm::vec3(0);
 }
 
+// 연결점 생략형: Attach(부모,자식,신축상속=false).
+// 예: Attach(0,1); / Attach(0,1,true);
+// 현재 model의 위치를 부모 기준 상대 위치로 해석하므로 연결 순간 월드 위치가 바뀔 수 있습니다.
+// 초기화 직후에는 boxSettings의 center가 상대 위치입니다. 부모 회전은 전체 상속합니다.
+// 면을 고정하지 않으므로 기존 몸통/팔다리의 상대 이동과 관절 회전을 유지합니다.
+void Attach(int parent,int child,bool inheritScale=false)
+{
+    Attach(parent,child,Pivot::Center,Pivot::Center,Orientation::Inherit,inheritScale);
+    boxes[child].attachment.enabled=false;
+}
+
 // FollowLag(자식,연결점,반응 시간(초),최대 기울기(도)). 0도를 지정하면 효과를 끕니다.
-// Attach를 사용한 객체는 Attach의 자식 연결점을 축으로 씁니다. 연결점은 부모를 즉시 따르고,
+// 연결점 지정형 Attach는 자식 연결점을 축으로 사용하고, 생략형은 FollowLag의 연결점을 사용합니다.
+// 연결점은 부모를 즉시 따르고,
 // 몸체는 움직임 반대쪽으로 기울다가 복귀합니다. 별도 Run이나 키 입력 처리가 필요 없습니다.
 void FollowLag(int child,Pivot hinge=Pivot::Top,float seconds=.25f,float maxAngle=25.0f)
 {
@@ -886,8 +896,8 @@ void ResetScene()
         if(setting.size.x<=0 || setting.size.y<=0 || setting.size.z<=0)
             throw runtime_error("Initial box size must be positive");
         boxes[i].animation=glm::mat4(1);
-        boxes[i].parent=setting.parent;
-        boxes[i].inheritScale=setting.inheritScale;
+        boxes[i].parent=-1;
+        boxes[i].inheritScale=false;
         boxes[i].attachment={};
         boxes[i].followLag={};
         boxes[i].baseSize=setting.size;
@@ -909,15 +919,19 @@ void ResetScene()
         model=model*glm::mat4_cast(glm::quat(glm::radians(setting.angles)));
         boxes[i].model=glm::scale(model,setting.size);
     }
+    // 부모 관계와 신축 상속은 이곳의 Attach에서만 설정합니다.
+    // 연결점 생략형: boxSettings의 위치를 부모 기준 상대 위치로 사용합니다.
+    for(int child=32;child<=36;++child)Attach(31,child,false);
+    for(int child=37;child<=39;++child)Attach(36,child,false);
     // 수정 영역 ①-추가: boxSettings에서 객체를 켠 다음 필요한 줄만 주석 해제합니다.
     // 21번 윗면을 20번 밑면에 고정합니다. 21번 중심 위치 대신 두 연결점이 배치를 정합니다.
     // Attach(20,21,Pivot::Bottom,Pivot::Top);
     // FollowLag(21,Pivot::Top,.25f,25.0f); // 20번이 움직이면 21번이 기울고, 멈추면 복귀
     // Attach(21,22,Pivot::Bottom,Pivot::Top,Orientation::KeepUpright); // 22번은 21번 끝에 붙어 수평 유지
     // Orientation::Inherit: 부모 회전 전체, KeepUpright: 수평 방향만, KeepWorld: 자식 자체 방향만.
-    // 자식 자체의 초기 각도/Rotate는 각 모드에서 유지됩니다. 신축 상속은 boxSettings의 기존 값으로 정합니다.
+    // 자식 자체의 초기 각도/Rotate는 각 모드에서 유지됩니다. 신축 상속은 Attach의 마지막 bool 인자로 정합니다.
     // Point(0,.2f,0)처럼 면 중심 대신 각 부품의 중심에서 잰 위치를 지정할 수 있습니다.
-    // FollowLag는 Attach 없이도 사용합니다. boxSettings에 부모를 지정하고 FollowLag(자식번호)를 호출하세요.
+    // FollowLag 사용 전 Attach로 부모를 지정하세요. 연결점 생략형 Attach도 사용할 수 있습니다.
     // 반응 시간을 늘리면 기울어진 상태가 오래 남습니다. 수평을 유지할 손에는 FollowLag를 생략합니다.
     // 변환 예: Run(Move(20,{1,0,0},1.0f)); // 자식에게 이동 명령을 다시 줄 필요 없이 따라옵니다.
     // 연결점을 미는 예: Run(Move(21,{.2f,0,0},.5f)); // 21번 연결점을 부모 기준 +X로 이동
@@ -1054,54 +1068,149 @@ void DrawScene(int width,int height)
 }
 
 // ============================================================================
-// 상속 예시: 0번 몸통, 1번 팔(parent=0)을 설정한 경우
-// Run(Repeat(PingPong(Rotate(1,Axis::X,30,Pivot::Top,1.0f)),Forever));
-// Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f));
-// 위 두 작업은 함께 실행 가능합니다. 몸통이 돌아도 팔의 어깨와 흔드는 축이 함께 돌아갑니다.
-// 팔의 Point(...)는 부모 중심 기준이며, Pivot::Top은 부모 공간에서 기록한 팔의 윗면입니다.
-// 부모와 자식에게 같은 전체 이동/회전을 중복 지정하면 두 번 적용되므로 전체 동작은 부모만 지정합니다.
-// Swap은 부모 번호와 inheritScale 설정이 같은 두 객체 사이에서 사용합니다.
-// 부모 없는 기존 객체 설정과 함수 호출은 변경할 필요가 없습니다.
-// 수정 영역 ②: 예비 키 9개. 아래 주석을 참고해 원하는 명령만 작성합니다.
-// 명령의 객체 번호는 수정 영역 ①의 0~39와 같습니다.
+// [키 입력에서 사용하는 변환 함수 요약]
+// 아래 번호는 boxSettings의 활성 객체 번호(0~39)입니다. 시간 단위는 초입니다.
+// Move/Rotate/Scale/Swap은 명령을 만들며, Run(명령)을 호출해야 실행됩니다.
+// Attach/FollowLag는 설정 함수이므로 Run으로 감싸지 않습니다.
 //
-// 단일 실행: Run(Move(0,{1,0,0}));
-// 스왑: Run(Swap(0,1,2.0f)); // 두 객체의 중심 위치를 2초 동안 교환합니다.
-// 스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f),Forever)); // 2초마다 교환하며 4초마다 원위치로 돌아옵니다.
-// 직선 스왑: Run(Swap(0,1,2.0f,SwapMode::Direct));
-// XZ 반원 스왑: Run(Swap(0,1,2.0f,SwapMode::ArcXZ));
-// XZ ㄷ자 스왑: Run(Swap(0,1,2.0f,SwapMode::DetourXZ));
-// XY ㄷ자 스왑: Run(Swap(0,1,2.0f,SwapMode::DetourXY));
-// 방식 지정 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
-// 시간 지정: Run(Move(0,{1,0,0},2.0f)); // 편도 2초
-// 회전 시간 지정: Run(Rotate(0,Axis::Y,90,Pivot::Center,3.0f)); // 편도 3초
-// 신축 시간 지정: Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 편도 1초
-// 시간을 생략하거나 0으로 지정하면 MOVE_SPEED / ROTATE_SPEED / SCALE_SPEED를 사용합니다.
-// Rotate와 Scale의 시간을 지정할 때는 기준점도 반드시 적습니다.
-// PingPong의 왕복 시간은 편도 시간의 두 배입니다.
-// 동시 왕복 주기 맞추기: 아래 명령은 함께 1초 동안 변환하고 1초 동안 돌아옵니다.
-// slots[0]=Run(Repeat(Parallel({PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),PingPong(Move(1,{0,.05f,0},1.0f))}),Forever));
-// Repeat 자체가 시간을 맞추지는 않습니다. 동시에 왕복할 변환의 편도 시간을 같게 지정합니다.
-// 동시 실행: Run(Parallel({Move(0,{1,0,0}),Rotate(1,Axis::Y,90)}));
-// 순차 실행: Run(Sequence({Move(0,{1,0,0}),Rotate(0,Axis::Y,90),Scale(0,Axis::Y,+.5f,Pivot::Bottom)}));
-// 3회 반복: Run(Repeat(Move(0,{.2f,0,0}),3)); // 상대 이동 누적
-// 3회 왕복: Run(Repeat(PingPong(Move(0,{1,0,0})),3));
-// 무한 왕복: slots[0]=Run(Repeat(PingPong(Rotate(0,Axis::Y,90)),Forever));
-// 정지/재개: TogglePause(slots[0]); // Pause, Resume를 따로 사용해도 됩니다.
-// 완료 확인: if(IsFinished(slots[0])) slots[0]=Run(Move(0,{1,0,0}));
-// 현재 상태에서 취소: Cancel(slots[0]);
-// 시작 또는 정지/재개:
-// if(IsFinished(slots[0])) slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0})),Forever));
-// else TogglePause(slots[0]);
+// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},시간));
+//    Run(Move(0,{1,0,0},2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
+//    좌표는 목적지가 아니라 상대 이동량입니다. 부모가 있으면 부모 좌표계 기준입니다.
+//    연결점 지정형 Attach는 부모 연결점 offset을 이동하고, 생략형은 부모 기준 상대 위치를 이동합니다.
 //
-// 하나처럼 회전: 모든 객체에 같은 Point를 지정합니다. 각자 Center를 사용하면 제자리 회전입니다.
-// Center 자전은 현재 중심을 따라가므로 Move, Swap, Point 기준 공전과 동시에 사용할 수 있습니다.
-// 공전하며 자전: Run(Parallel({Rotate(0,Axis::Y,360,Point(0,0,0),4.0f),Repeat(Rotate(0,Axis::X,360,Pivot::Center,1.0f),4)}));
-// Run(Parallel({Rotate(0,Axis::Y,90,Point(0,0,0)),Rotate(1,Axis::Y,90,Point(0,0,0))}));
-// 같은 객체에 동시 변환을 주면 고정 시간 간격마다 목록 순서로 합성합니다.
-// 무한반복을 Sequence 중간에 넣으면 뒤 명령은 실행되지 않습니다.
-// 비활성 객체는 보이지 않고 변환도 적용하지 않습니다. 명령의 진행 시간은 유지합니다.
-// ============================================================================
+// 2) 회전: Run(Rotate(번호,축,각도,기준점,시간));
+//    Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f)); // 현재 중심에서 90도 자전
+//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),2.0f)); // 조립 공간 원점 주위 공전
+//    각도는 현재 상태에 추가하는 도 단위 값(-360~360), 양수는 오른손 법칙입니다.
+//    Axis::X/Y/Z는 조립 공간의 고정 축이며, 부모가 있으면 부모 좌표계의 축입니다.
+//    Center는 이동 중인 중심을 계속 따라갑니다. 객체 자체의 회전된 로컬 축은 아닙니다.
+//
+// 3) 신축: Run(Scale(번호,축,배율증감,기준점,시간));
+//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 아래 면 기준 높이를 1.5배
+//    최종 배율 = 1 + 배율증감: .5는 1.5배, 1은 2배, -.5는 절반. -1 이하는 금지.
+//    Center는 현재 중심을 따라가므로 이동과 함께 써도 신축 때문에 중심이 밀리지 않습니다.
+//    축은 회전과 마찬가지로 조립/부모 공간 기준입니다. 기울어진 객체는 비스듬히 변형될 수 있습니다.
+//
+// 4) 기준점: Pivot::Center/Left/Right/Bottom/Top/Front/Back 또는 Point(x,y,z)
+//    Front는 -Z 면, Back은 +Z 면입니다. Center 생략 가능, 기본값은 Center입니다.
+//    회전/신축의 면 기준점은 시작할 때 계산하여 고정합니다. Center만 현재 중심을 따라갑니다.
+//    변환의 Point는 조립/부모 공간 좌표입니다. 조립 공간 전체 이동 시 함께 움직입니다.
+//    시간을 지정할 때는 Rotate/Scale의 기준점 인자도 반드시 작성합니다.
+//    시간 생략 또는 0은 즉시 실행이 아니라 MOVE_SPEED/ROTATE_SPEED/SCALE_SPEED로 계산합니다.
+//
+// 5) 연결: Attach(부모번호,자식번호,부모연결점,자식연결점,방향상속,신축상속);
+//    Attach(0,1,Pivot::Bottom,Pivot::Top); // 부모 아래와 자식 위를 맞붙임
+//    Attach(0,1,Point(.2f,0,0),Pivot::Top,Orientation::KeepUpright);
+//    Attach의 Point는 해당 객체 중심 기준 길이이며, 변환 함수의 Point와 의미가 다릅니다.
+//    Orientation::Inherit: 부모 회전 전체 상속(기본값)
+//    Orientation::KeepUpright: 부모의 Y축 방향만 상속, 기울기는 따라가지 않음
+//    Orientation::KeepWorld: 부모 회전을 상속하지 않음. 자식 자체 회전은 유지
+//    자식 Rotate/Scale 후에도 연결점을 다시 맞춥니다. 연결 순간 위치가 바뀔 수 있습니다.
+//    Attach(0,1,Pivot::Bottom,Pivot::Top,Orientation::Inherit,true); // 부모 신축도 상속
+//    마지막 bool 생략/false: 자식 크기 유지, true: 부모 신축도 상속
+//    연결점 위치는 false여도 부모의 신축을 따라갑니다.
+//    Attach(0,1,false); // 연결점 고정 없이 부모 관계만 설정, 기존 상대 위치 사용
+//    Attach(0,1,true);  // 상대 위치 사용 + 부모 신축 상속
+//    전체 이동/회전은 부모에만 주면 자식도 따라옵니다. 부모와 자식에 중복 적용하지 마세요.
+//    초기 연결은 ResetScene에서 설정하고, 키 입력 중 Attach하면 그 시점에 연결됩니다.
+//
+// 6) 따라 흔들림: FollowLag(자식번호,연결점,반응시간,최대기울기);
+//    FollowLag(1,Pivot::Top,.25f,25.0f); // 부모 움직임 반대쪽으로 기울다가 복귀
+//    먼저 Attach로 부모를 지정합니다. 연결점 지정형은 Attach의 자식 연결점을 사용합니다.
+//    연결점 생략형은 FollowLag의 연결점을 사용합니다. 예: Attach(0,1); FollowLag(1,Pivot::Top);
+//    반응시간은 지연 감쇠 시간이며 완료 시간이 아닙니다. 클수록 천천히 복귀합니다.
+//    최대기울기는 0 이상 90도 미만입니다. 연결점이 중심이면 기울기 효과는 없습니다.
+//    최대기울기 0으로 효과를 끕니다. 물리 충돌 계산이 아닌 따라 흔들리는 효과입니다.
+//
+// 7) 위치 교환: Run(Swap(번호1,번호2,시간,방식));
+//    Run(Swap(0,1,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
+//    Direct: 직선(기본), ArcXZ: XZ 반원, DetourXZ: XZ ㄷ자, DetourXY: XY ㄷ자
+//    서로 다른 활성 객체, 같은 부모와 inheritScale 설정, 양수 시간이 필요합니다.
+//    연결점 지정형 Attach는 Swap 불가입니다. 생략형은 같은 부모/신축상속 조건이면 가능합니다.
+//
+// 8) 조합: Parallel은 동시 실행, Sequence는 앞 명령 완료 후 다음 실행입니다.
+//    Run(Parallel({Move(0,{1,0,0},2),Rotate(0,Axis::Y,90,Pivot::Center,2)}));
+//    Run(Sequence({Move(0,{1,0,0},1),Rotate(0,Axis::Y,90,Pivot::Center,1)}));
+//    같은 객체의 동시 변환은 하나의 Run(Parallel({...}))로 묶습니다.
+//    다른 Run이 같은 객체를 사용 중이면 일시정지 상태라도 새 작업을 시작할 수 없습니다.
+//
+// 9) 반복/왕복: Repeat(명령,횟수), 무한반복은 Forever입니다.
+//    Run(Repeat(Move(0,{.2f,0,0},1),3)); // 총 +X .6 이동: 상대 변환이 누적됨
+//    Run(Repeat(PingPong(Move(0,{1,0,0},1)),Forever)); // 1초 이동 + 1초 복귀
+//    PingPong에는 Move/Rotate/Scale 한 개만 넣습니다. Parallel/Swap은 직접 넣지 않습니다.
+//    두 객체가 같은 주기로 신축: 각각 편도 1초, 왕복 2초로 맞춥니다.
+//    slots[0]=Run(Repeat(Parallel({
+//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),
+//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,1.0f))
+//    }),Forever));
+//    Repeat는 시간을 자동으로 맞추지 않습니다. 각 변환의 시간을 같게 지정하세요.
+//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
+//    신축만 Repeat하면 계속 커집니다. 크기 복귀가 필요하면 PingPong을 사용하세요.
+//
+// 10) 키를 다시 누르면 일시정지/재개하는 기본 형태:
+//    if(IsFinished(slots[0]))
+//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},1.0f)),Forever));
+//    else TogglePause(slots[0]);
+//    slots에는 객체 번호가 아니라 Run이 반환한 작업 번호를 저장합니다.
+//    Pause/Resume/TogglePause/Cancel은 작업 전체에 적용합니다.
+//    Cancel(slots[0])은 현재 모습을 유지하며 작업만 종료합니다. 초기화는 r입니다.
+//    키마다 slots[0]~slots[8]을 나누되, 같은 객체의 작업 충돌은 별도로 피해야 합니다.
+//    일반 키는 누를 때 한 번 실행됩니다. 누르는 동안의 이동은 갱신 함수에서 처리합니다.
+
+// 11) 복합 예시: 이동 + 자전 + 신축 왕복 → XZ 반원 스왑 → 전체 무한반복
+// 전제: 0번과 1번은 활성화된 독립 객체이며, 다른 작업에서 사용하고 있지 않아야 합니다.
+// 인형뽑기 모드의 0/1번은 이미 연결되어 있으므로, 이 예시에는 별도의 독립 객체 번호를 넣으세요.
+// 원하는 키 처리 안에 아래 if/else를 넣습니다. 다시 누르면 전체 작업이 일시정지/재개됩니다.
+// if(IsFinished(slots[0])) {
+//     slots[0]=Run(Repeat(Sequence({
+//         Parallel({
+//             PingPong(Move(0,{0,.5f,0},1.0f)),
+//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,1.0f)),
+//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,1.0f)),
+//             PingPong(Move(1,{0,.5f,0},1.0f)),
+//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,1.0f)),
+//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,1.0f))
+//         }),
+//         Swap(0,1,2.0f,SwapMode::ArcXZ)
+//     }),Forever));
+// } else {
+//     TogglePause(slots[0]);
+// }
+// 처음 1초: 두 객체가 위로 이동하며 반대 방향으로 자전하고 각자 지정 축으로 1.5배 신축합니다.
+// 다음 1초: 이동·회전·크기가 복귀합니다. Center 기준이므로 이동 중에도 중심에서 변환됩니다.
+// 다음 2초: 자세와 크기를 유지하며 서로의 위치로 반원 이동합니다. 한 반복은 총 4초입니다.
+// 4초 뒤에는 서로의 자리에서 같은 동작을 반복하며, 8초 뒤 두 객체의 위치도 처음으로 돌아옵니다.
+// Repeat 안에 Sequence를 넣었으므로 왕복 완료 후 스왑하며, Parallel 안의 변환은 동시에 시작합니다.
+// slots[0]은 이 예시 전용으로 사용하세요. 다른 객체 번호로 바꾸면 Move/Rotate/Scale/Swap을 모두 바꾸세요.
+
+// 12) 키를 누르는 동안만 실행: 누르면 시작/재개, 떼면 현재 상태에서 일시정지
+// 아래 예시는 CustomKey가 아니라 KeyCallback 안의 if(action!=GLFW_PRESS)return; 바로 위에 넣습니다.
+// 그 아래에 넣으면 GLFW_RELEASE가 걸러져 키를 떼어도 멈추지 않습니다.
+// A와 slots[0]은 예시입니다. 기존 키/작업과 겹치지 않게 변경하세요.
+// 특히 인형뽑기의 A는 이동키이므로 사용하지 않는 키를 선택해야 합니다.
+// if(key==GLFW_KEY_A) {
+//     if(action==GLFW_PRESS) {
+//         if(IsFinished(slots[0])) {
+//             slots[0]=Run(Repeat(
+//                 Rotate(0,Axis::Y,360,Pivot::Center,4.0f),
+//                 Forever
+//             ));
+//         } else {
+//             Resume(slots[0]);
+//         }
+//     } else if(action==GLFW_RELEASE) {
+//         Pause(slots[0]);
+//     }
+//     return; // 같은 키가 기존 CustomKey로 전달되어 중복 실행되는 것을 막습니다.
+// }
+// GLFW_REPEAT에서는 새 작업을 만들지 않습니다. 이미 등록한 작업이 갱신 함수에서 계속 실행됩니다.
+// 다시 누르면 처음부터 시작하지 않고 멈춘 지점부터 이어집니다.
+// 위 Run(...)을 11번의 복합 작업으로 바꾸면 그 작업 전체가 함께 정지/재개됩니다.
+// 유한 작업이 끝난 후 다시 누르면 새 작업을 시작합니다. 무한 동작은 Repeat(...,Forever)를 사용합니다.
+// return은 콜백의 중복 처리만 막습니다. 갱신 함수에서 같은 키를 glfwGetKey로 읽는 동작은 별도로 남습니다.
+
+
+//
 void CustomKey(int key)
 {
     switch(key)
@@ -1408,8 +1517,6 @@ struct BoxSetting
     glm::vec3 size{.3f},center{0};
     Color color;
     glm::vec3 angles{0};
-    int parent=-1; // -1: 기존 독립 객체, 0~39: 부모 객체 번호
-    bool inheritScale=false; // false: 자기 크기 유지, true: 부모 신축도 상속
 };
 enum class Orientation { Inherit, KeepUpright, KeepWorld }; // 부모 회전 전체 / Y축 방향만 / 자식 자체 방향만
 struct Attachment
@@ -1440,15 +1547,10 @@ struct BoxState
 
 // ============================================================================
 // 수정 영역 ①: 번호 0~39의 활성화, 전체 크기, 중심 좌표, RGB 색상, 초기 회전각
-// 마지막에 부모 번호와 신축 상속을 선택적으로 추가합니다. 생략하면 기존과 완전히 같습니다.
-// {true,{크기},{위치},색상,{각도},부모번호,신축상속}
-// 부모가 있으면 위치·Move·회전축·Point 좌표는 부모 중심 기준이며, 단위는 기존과 같은 길이입니다.
-// 부모 신축 시 위치는 함께 이동합니다. false이면 자식 크기는 유지하고 true이면 크기도 상속합니다.
-// 예: {true,{.3f,.5f,.2f},{0,.7f,0},Color::Random(),{0,0,0},-1,false}, // 몸통 0번
-// 예: {true,{.1f,.4f,.1f},{-.23f,0,0},Color::Random(),{0,0,0},0,false}, // 왼팔 1번
-// 이 예에서는 팔 윗면이 몸통 중심보다 .2 위에 있습니다. 상대 좌표로 부착 위치를 조정합니다.
-// 부모의 이동·회전은 모든 후손에게 전달됩니다. 자식 변환은 부모에 영향을 주지 않습니다.
-// 부모가 비활성화되면 자식도 숨깁니다. 자기 자신/순환 연결/범위 밖 부모 번호는 허용하지 않습니다.
+// {활성화,{크기},{위치},색상,{초기각도}}만 지정합니다.
+// 부모/자식 관계와 신축 상속은 ResetScene의 Attach에서 설정합니다.
+// 연결점 생략형 Attach에서는 위치가 부모 기준 상대 좌표입니다.
+// 연결점 지정형 Attach에서는 두 연결점이 맞닿도록 위치를 계산합니다.
 // true인 객체만 표시됩니다. 크기/좌표/색상은 아래 한 곳에서만 설정합니다.
 // 초기 회전각은 {X각,Y각,Z각}, 기본 {0,0,0}입니다. 크기는 양수로 지정합니다.
 // 색상 인자 예: { .9f,.2f,.2f } / Color::Random() / Color::Random(1)
@@ -1512,11 +1614,15 @@ double previousMouseX=0,previousMouseY=0,accumulator=0;
 GLuint programID=0,vao=0,vbo=0;
 GLint modelLocation,viewLocation,projectionLocation,colorLocation;
 
-// Attach(부모,자식,부모 연결점,자식 연결점,방향 상속).
+// 연결점 지정형: Attach(부모,자식,부모연결점,자식연결점,방향상속,신축상속).
+// 방향상속 기본값은 Orientation::Inherit, 신축상속 기본값은 false입니다.
+// false는 자식 크기 유지, true는 부모 신축 상속입니다. 연결 위치는 두 경우 모두 부모를 따릅니다.
+// 예: Attach(0,1,Pivot::Bottom,Pivot::Top,Orientation::Inherit,true);
+// 신축상속을 지정하려면 앞의 방향상속도 작성합니다. 부모 관계는 boxSettings에 쓰지 않습니다.
 // Pivot::Top/Bottom 등은 각 객체의 면 중심, Point(x,y,z)는 해당 객체 중심 기준 길이입니다.
 // 연결점이 맞닿도록 중심을 계산합니다. Move는 부모 기준 연결점 오프셋을 옮기고,
 // 자식 Rotate/Scale은 자신의 변환을 적용한 뒤 연결점을 다시 맞춥니다.
-void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation orientation=Orientation::Inherit)
+void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation orientation=Orientation::Inherit,bool inheritScale=false)
 {
     if(child<0 || child>=BOX_COUNT || parent<0 || parent>=BOX_COUNT)
         throw runtime_error("Attachment box ID must be 0~39");
@@ -1528,13 +1634,26 @@ void Attach(int parent,int child,Pivot parentPoint,Pivot childPoint,Orientation 
     }
     auto& box=boxes[child];
     box.parent=parent;
+    box.inheritScale=inheritScale;
     box.attachment={true,parentPoint,childPoint,orientation};
     box.followLag.sampled=false;
     box.followLag.trailingOffset=glm::vec3(0);
 }
 
+// 연결점 생략형: Attach(부모,자식,신축상속=false).
+// 예: Attach(0,1); / Attach(0,1,true);
+// 현재 model의 위치를 부모 기준 상대 위치로 해석하므로 연결 순간 월드 위치가 바뀔 수 있습니다.
+// 초기화 직후에는 boxSettings의 center가 상대 위치입니다. 부모 회전은 전체 상속합니다.
+// 면을 고정하지 않으므로 기존 몸통/팔다리의 상대 이동과 관절 회전을 유지합니다.
+void Attach(int parent,int child,bool inheritScale=false)
+{
+    Attach(parent,child,Pivot::Center,Pivot::Center,Orientation::Inherit,inheritScale);
+    boxes[child].attachment.enabled=false;
+}
+
 // FollowLag(자식,연결점,반응 시간(초),최대 기울기(도)). 0도를 지정하면 효과를 끕니다.
-// Attach를 사용한 객체는 Attach의 자식 연결점을 축으로 씁니다. 연결점은 부모를 즉시 따르고,
+// 연결점 지정형 Attach는 자식 연결점을 축으로 사용하고, 생략형은 FollowLag의 연결점을 사용합니다.
+// 연결점은 부모를 즉시 따르고,
 // 몸체는 움직임 반대쪽으로 기울다가 복귀합니다. 별도 Run이나 키 입력 처리가 필요 없습니다.
 void FollowLag(int child,Pivot hinge=Pivot::Top,float seconds=.25f,float maxAngle=25.0f)
 {
@@ -2157,8 +2276,8 @@ void ResetScene()
         if(setting.size.x<=0 || setting.size.y<=0 || setting.size.z<=0)
             throw runtime_error("Initial box size must be positive");
         boxes[i].animation=glm::mat4(1);
-        boxes[i].parent=setting.parent;
-        boxes[i].inheritScale=setting.inheritScale;
+        boxes[i].parent=-1;
+        boxes[i].inheritScale=false;
         boxes[i].attachment={};
         boxes[i].followLag={};
         boxes[i].baseSize=setting.size;
@@ -2180,7 +2299,10 @@ void ResetScene()
         model=model*glm::mat4_cast(glm::quat(glm::radians(setting.angles)));
         boxes[i].model=glm::scale(model,setting.size);
     }
-    // 수정 영역 ①-추가: Attach(부모,자식,부모 연결점,자식 연결점).
+    // 수정 영역 ①-추가: 부모 관계는 아래 Attach에서만 설정합니다.
+    // Attach(부모,자식,부모연결점,자식연결점,Orientation::Inherit,false);
+    // 마지막 true는 부모 신축 상속, false 또는 생략은 자식 크기 유지입니다.
+    // 연결점 없이 상대 위치로 배치하려면 Attach(부모,자식,신축상속)을 사용합니다.
     Attach(CLAW_HEAD,CLAW_ROD,Pivot::Bottom,Pivot::Top);
     Attach(CLAW_ROD,CLAW_BODY,Pivot::Bottom,Pivot::Top);
     for(int finger=0;finger<CLAW_COUNT;++finger)
@@ -2309,6 +2431,149 @@ void DrawScene(int width,int height)
 // ============================================================================
 // 수정 영역 ②: 키 입력과 단계별 변환 설정
 // GLFW_KEY_UNKNOWN은 일반 키 대신 고정 시간 갱신을 뜻합니다.
+// [키 입력에서 사용하는 변환 함수 요약]
+// 아래 번호는 boxSettings의 활성 객체 번호(0~39)입니다. 시간 단위는 초입니다.
+// Move/Rotate/Scale/Swap은 명령을 만들며, Run(명령)을 호출해야 실행됩니다.
+// Attach/FollowLag는 설정 함수이므로 Run으로 감싸지 않습니다.
+//
+// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},시간));
+//    Run(Move(0,{1,0,0},2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
+//    좌표는 목적지가 아니라 상대 이동량입니다. 부모가 있으면 부모 좌표계 기준입니다.
+//    연결점 지정형 Attach는 부모 연결점 offset을 이동하고, 생략형은 부모 기준 상대 위치를 이동합니다.
+//
+// 2) 회전: Run(Rotate(번호,축,각도,기준점,시간));
+//    Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f)); // 현재 중심에서 90도 자전
+//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),2.0f)); // 조립 공간 원점 주위 공전
+//    각도는 현재 상태에 추가하는 도 단위 값(-360~360), 양수는 오른손 법칙입니다.
+//    Axis::X/Y/Z는 조립 공간의 고정 축이며, 부모가 있으면 부모 좌표계의 축입니다.
+//    Center는 이동 중인 중심을 계속 따라갑니다. 객체 자체의 회전된 로컬 축은 아닙니다.
+//
+// 3) 신축: Run(Scale(번호,축,배율증감,기준점,시간));
+//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 아래 면 기준 높이를 1.5배
+//    최종 배율 = 1 + 배율증감: .5는 1.5배, 1은 2배, -.5는 절반. -1 이하는 금지.
+//    Center는 현재 중심을 따라가므로 이동과 함께 써도 신축 때문에 중심이 밀리지 않습니다.
+//    축은 회전과 마찬가지로 조립/부모 공간 기준입니다. 기울어진 객체는 비스듬히 변형될 수 있습니다.
+//
+// 4) 기준점: Pivot::Center/Left/Right/Bottom/Top/Front/Back 또는 Point(x,y,z)
+//    Front는 -Z 면, Back은 +Z 면입니다. Center 생략 가능, 기본값은 Center입니다.
+//    회전/신축의 면 기준점은 시작할 때 계산하여 고정합니다. Center만 현재 중심을 따라갑니다.
+//    변환의 Point는 조립/부모 공간 좌표입니다. 조립 공간 전체 이동 시 함께 움직입니다.
+//    시간을 지정할 때는 Rotate/Scale의 기준점 인자도 반드시 작성합니다.
+//    시간 생략 또는 0은 즉시 실행이 아니라 MOVE_SPEED/ROTATE_SPEED/SCALE_SPEED로 계산합니다.
+//
+// 5) 연결: Attach(부모번호,자식번호,부모연결점,자식연결점,방향상속,신축상속);
+//    Attach(0,1,Pivot::Bottom,Pivot::Top); // 부모 아래와 자식 위를 맞붙임
+//    Attach(0,1,Point(.2f,0,0),Pivot::Top,Orientation::KeepUpright);
+//    Attach의 Point는 해당 객체 중심 기준 길이이며, 변환 함수의 Point와 의미가 다릅니다.
+//    Orientation::Inherit: 부모 회전 전체 상속(기본값)
+//    Orientation::KeepUpright: 부모의 Y축 방향만 상속, 기울기는 따라가지 않음
+//    Orientation::KeepWorld: 부모 회전을 상속하지 않음. 자식 자체 회전은 유지
+//    자식 Rotate/Scale 후에도 연결점을 다시 맞춥니다. 연결 순간 위치가 바뀔 수 있습니다.
+//    Attach(0,1,Pivot::Bottom,Pivot::Top,Orientation::Inherit,true); // 부모 신축도 상속
+//    마지막 bool 생략/false: 자식 크기 유지, true: 부모 신축도 상속
+//    연결점 위치는 false여도 부모의 신축을 따라갑니다.
+//    Attach(0,1,false); // 연결점 고정 없이 부모 관계만 설정, 기존 상대 위치 사용
+//    Attach(0,1,true);  // 상대 위치 사용 + 부모 신축 상속
+//    전체 이동/회전은 부모에만 주면 자식도 따라옵니다. 부모와 자식에 중복 적용하지 마세요.
+//    초기 연결은 ResetScene에서 설정하고, 키 입력 중 Attach하면 그 시점에 연결됩니다.
+//
+// 6) 따라 흔들림: FollowLag(자식번호,연결점,반응시간,최대기울기);
+//    FollowLag(1,Pivot::Top,.25f,25.0f); // 부모 움직임 반대쪽으로 기울다가 복귀
+//    먼저 Attach로 부모를 지정합니다. 연결점 지정형은 Attach의 자식 연결점을 사용합니다.
+//    연결점 생략형은 FollowLag의 연결점을 사용합니다. 예: Attach(0,1); FollowLag(1,Pivot::Top);
+//    반응시간은 지연 감쇠 시간이며 완료 시간이 아닙니다. 클수록 천천히 복귀합니다.
+//    최대기울기는 0 이상 90도 미만입니다. 연결점이 중심이면 기울기 효과는 없습니다.
+//    최대기울기 0으로 효과를 끕니다. 물리 충돌 계산이 아닌 따라 흔들리는 효과입니다.
+//
+// 7) 위치 교환: Run(Swap(번호1,번호2,시간,방식));
+//    Run(Swap(0,1,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
+//    Direct: 직선(기본), ArcXZ: XZ 반원, DetourXZ: XZ ㄷ자, DetourXY: XY ㄷ자
+//    서로 다른 활성 객체, 같은 부모와 inheritScale 설정, 양수 시간이 필요합니다.
+//    연결점 지정형 Attach는 Swap 불가입니다. 생략형은 같은 부모/신축상속 조건이면 가능합니다.
+//
+// 8) 조합: Parallel은 동시 실행, Sequence는 앞 명령 완료 후 다음 실행입니다.
+//    Run(Parallel({Move(0,{1,0,0},2),Rotate(0,Axis::Y,90,Pivot::Center,2)}));
+//    Run(Sequence({Move(0,{1,0,0},1),Rotate(0,Axis::Y,90,Pivot::Center,1)}));
+//    같은 객체의 동시 변환은 하나의 Run(Parallel({...}))로 묶습니다.
+//    다른 Run이 같은 객체를 사용 중이면 일시정지 상태라도 새 작업을 시작할 수 없습니다.
+//
+// 9) 반복/왕복: Repeat(명령,횟수), 무한반복은 Forever입니다.
+//    Run(Repeat(Move(0,{.2f,0,0},1),3)); // 총 +X .6 이동: 상대 변환이 누적됨
+//    Run(Repeat(PingPong(Move(0,{1,0,0},1)),Forever)); // 1초 이동 + 1초 복귀
+//    PingPong에는 Move/Rotate/Scale 한 개만 넣습니다. Parallel/Swap은 직접 넣지 않습니다.
+//    두 객체가 같은 주기로 신축: 각각 편도 1초, 왕복 2초로 맞춥니다.
+//    slots[0]=Run(Repeat(Parallel({
+//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),
+//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,1.0f))
+//    }),Forever));
+//    Repeat는 시간을 자동으로 맞추지 않습니다. 각 변환의 시간을 같게 지정하세요.
+//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
+//    신축만 Repeat하면 계속 커집니다. 크기 복귀가 필요하면 PingPong을 사용하세요.
+//
+// 10) 키를 다시 누르면 일시정지/재개하는 기본 형태:
+//    if(IsFinished(slots[0]))
+//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},1.0f)),Forever));
+//    else TogglePause(slots[0]);
+//    slots에는 객체 번호가 아니라 Run이 반환한 작업 번호를 저장합니다.
+//    Pause/Resume/TogglePause/Cancel은 작업 전체에 적용합니다.
+//    Cancel(slots[0])은 현재 모습을 유지하며 작업만 종료합니다. 초기화는 r입니다.
+//    키마다 slots[0]~slots[8]을 나누되, 같은 객체의 작업 충돌은 별도로 피해야 합니다.
+//    일반 키는 누를 때 한 번 실행됩니다. 누르는 동안의 이동은 갱신 함수에서 처리합니다.
+
+// 11) 복합 예시: 이동 + 자전 + 신축 왕복 → XZ 반원 스왑 → 전체 무한반복
+// 전제: 0번과 1번은 활성화된 독립 객체이며, 다른 작업에서 사용하고 있지 않아야 합니다.
+// 인형뽑기 모드의 0/1번은 이미 연결되어 있으므로, 이 예시에는 별도의 독립 객체 번호를 넣으세요.
+// 원하는 키 처리 안에 아래 if/else를 넣습니다. 다시 누르면 전체 작업이 일시정지/재개됩니다.
+// if(IsFinished(slots[0])) {
+//     slots[0]=Run(Repeat(Sequence({
+//         Parallel({
+//             PingPong(Move(0,{0,.5f,0},1.0f)),
+//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,1.0f)),
+//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,1.0f)),
+//             PingPong(Move(1,{0,.5f,0},1.0f)),
+//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,1.0f)),
+//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,1.0f))
+//         }),
+//         Swap(0,1,2.0f,SwapMode::ArcXZ)
+//     }),Forever));
+// } else {
+//     TogglePause(slots[0]);
+// }
+// 처음 1초: 두 객체가 위로 이동하며 반대 방향으로 자전하고 각자 지정 축으로 1.5배 신축합니다.
+// 다음 1초: 이동·회전·크기가 복귀합니다. Center 기준이므로 이동 중에도 중심에서 변환됩니다.
+// 다음 2초: 자세와 크기를 유지하며 서로의 위치로 반원 이동합니다. 한 반복은 총 4초입니다.
+// 4초 뒤에는 서로의 자리에서 같은 동작을 반복하며, 8초 뒤 두 객체의 위치도 처음으로 돌아옵니다.
+// Repeat 안에 Sequence를 넣었으므로 왕복 완료 후 스왑하며, Parallel 안의 변환은 동시에 시작합니다.
+// slots[0]은 이 예시 전용으로 사용하세요. 다른 객체 번호로 바꾸면 Move/Rotate/Scale/Swap을 모두 바꾸세요.
+
+// 12) 키를 누르는 동안만 실행: 누르면 시작/재개, 떼면 현재 상태에서 일시정지
+// 아래 예시는 CustomKey가 아니라 KeyCallback 안의 if(action!=GLFW_PRESS)return; 바로 위에 넣습니다.
+// 그 아래에 넣으면 GLFW_RELEASE가 걸러져 키를 떼어도 멈추지 않습니다.
+// A와 slots[0]은 예시입니다. 기존 키/작업과 겹치지 않게 변경하세요.
+// 특히 인형뽑기의 A는 이동키이므로 사용하지 않는 키를 선택해야 합니다.
+// if(key==GLFW_KEY_A) {
+//     if(action==GLFW_PRESS) {
+//         if(IsFinished(slots[0])) {
+//             slots[0]=Run(Repeat(
+//                 Rotate(0,Axis::Y,360,Pivot::Center,4.0f),
+//                 Forever
+//             ));
+//         } else {
+//             Resume(slots[0]);
+//         }
+//     } else if(action==GLFW_RELEASE) {
+//         Pause(slots[0]);
+//     }
+//     return; // 같은 키가 기존 CustomKey로 전달되어 중복 실행되는 것을 막습니다.
+// }
+// GLFW_REPEAT에서는 새 작업을 만들지 않습니다. 이미 등록한 작업이 갱신 함수에서 계속 실행됩니다.
+// 다시 누르면 처음부터 시작하지 않고 멈춘 지점부터 이어집니다.
+// 위 Run(...)을 11번의 복합 작업으로 바꾸면 그 작업 전체가 함께 정지/재개됩니다.
+// 유한 작업이 끝난 후 다시 누르면 새 작업을 시작합니다. 무한 동작은 Repeat(...,Forever)를 사용합니다.
+// return은 콜백의 중복 처리만 막습니다. 갱신 함수에서 같은 키를 glfwGetKey로 읽는 동작은 별도로 남습니다.
+
+
+//
 void CustomKey(GLFWwindow* window,int key,float dt)
 {
     enum class Phase { Ready, Grabbing, Delivering, Opening, Dropping };
