@@ -215,6 +215,7 @@ struct Command
     Axis axis=Axis::Y;
     Pivot pivot=Pivot::Center;
     float amount=0,elapsed=0,duration=0,previous=0,seconds=0;
+    float delay=0,remainingDelay=0;
     bool started=false,done=false,backward=false;
     SwapMode swapMode=SwapMode::Direct;
     glm::vec3 swapStart[2]{glm::vec3(0),glm::vec3(0)};
@@ -496,12 +497,20 @@ void UpdatePlayer(float dt)
     PosePlayer();
 }
 
-// Move(번호,{dx,dy,dz},시간): 해당 단계 시작 위치에서 상대 이동합니다. 시간은 초 단위입니다.
+// 끝에 시간 하나를 쓰면 실행 시간, 두 개를 쓰면 대기 시간과 실행 시간입니다. 단위는 초입니다.
+// Move(3,{1,0,0},.0f,2.0f): 즉시 시작해 2초간 이동합니다.
+// 대기 시간은 .0f로 두면 변환을 바로 시작합니다.
+Command Move(int id,glm::vec3 delta,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Move;c.id=id;c.delta=delta;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Move(int id,glm::vec3 delta,float seconds=0)
 {
-    Command c;c.kind=Kind::Move;c.id=id;c.delta=delta;c.seconds=seconds;return c;
+    return Move(id,delta,0,seconds);
 }
-// Rotate(번호,축,각도,기준점,시간): -360~+360도. 기준점 생략 시 자기 중심.
+// Rotate(번호,축,각도,기준점,대기 시간,실행 시간): -360~+360도. 기준점 생략 시 자기 중심.
 // Center 회전은 매 순간 현재 중심을 따라갑니다. 이동이나 공전과 함께 실행해도 제자리 자전합니다.
 // 축 방향은 부모가 없으면 조립 공간의 고정 축, 있으면 부모를 따라 회전하는 축입니다.
 // Point는 지정 좌표, 면 기준점은 회전 시작 시의 위치를 계속 사용합니다.
@@ -517,15 +526,22 @@ Command Move(int id,glm::vec3 delta,float seconds=0)
 //    방향키 전체 이동은 조립 공간 전체에 적용되므로 Point 기준점도 함께 이동합니다.
 // 5. 시간(생략 가능): 편도 실행 시간(초). 양수를 넣으면 회전 속도는 각도/시간으로 정해집니다.
 //    생략하거나 0이면 ROTATE_SPEED를 사용합니다. 음수는 허용하지 않습니다.
-//    시간을 지정하려면 앞의 기준점도 적어야 합니다. PingPong으로 감싸면 왕복 시간은 두 배입니다.
-// 예: Rotate(0,Axis::X,90) -> 현재 중심에서 고정 X축 방향으로 +90도 자전합니다.
-// 예: Rotate(0,Axis::Y,-180,Point(0,0,0),2.0f) -> 원점을 지나는 Y축 주위로 2초 동안 -180도 공전합니다.
-// 예: Rotate(0,Axis::Z,45,Pivot::Top,1.0f) -> 시작 시 윗면 중심을 지나는 Z축 주위로 1초 동안 +45도 회전합니다.
+//    시간을 지정하려면 기준점도 적습니다. PingPong의 한 주기는 대기 시간 + 편도 실행 시간의 두 배입니다.
+// 예: Rotate(0,Axis::X,90,Pivot::Center,.0f,.0f) -> 현재 중심에서 고정 X축 방향으로 +90도 자전합니다.
+// 예: Rotate(0,Axis::Y,-180,Point(0,0,0),.0f,2.0f) -> 원점을 지나는 Y축 주위로 2초 동안 -180도 공전합니다.
+// 예: Rotate(0,Axis::Z,45,Pivot::Top,.0f,1.0f) -> 시작 시 윗면 중심을 지나는 Z축 주위로 1초 동안 +45도 회전합니다.
+// Rotate(3,Axis::Y,90,Pivot::Center,.0f,2.0f): 대기 없이 2초간 회전합니다.
+Command Rotate(int id,Axis axis,float degrees,Pivot pivot,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float seconds=0)
 {
-    Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;c.seconds=seconds;return c;
+    return Rotate(id,axis,degrees,pivot,0,seconds);
 }
-// Scale(번호,축,배율증감,기준점,시간): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
+// Scale(번호,축,배율증감,기준점,대기 시간,실행 시간): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
 // 부모가 없으면 조립 공간 축, 있으면 부모 좌표계 축으로 신축합니다. 기본 기준점은 자기 중심.
 // 부모가 있는 경우 아래 설명의 조립 공간은 해당 부모 좌표계를 뜻합니다.
 // 1. 번호: boxSettings의 객체 번호(0~BOX_COUNT-1). 활성화된 객체만 화면에서 변환됩니다.
@@ -542,28 +558,42 @@ Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float se
 // 5. 시간(생략 가능): 편도 실행 시간(초). 생략하거나 0이면 abs(배율증감)/SCALE_SPEED초가 걸립니다.
 //    양수 시간을 지정하면 해당 시간에 신축을 완료합니다. 음수는 허용하지 않습니다.
 //    시간을 지정하려면 기준점도 적어야 합니다. PingPong은 같은 시간 동안 원래 크기로 돌아옵니다.
-// 예: Scale(0,Axis::X,.5f) -> 매 순간 현재 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
-// 예: Run(Parallel({Move(0,{1,0,0},2.0f),Scale(0,Axis::X,.5f,Pivot::Center,2.0f)}));
+// 예: Scale(0,Axis::X,.5f,Pivot::Center,.0f,.0f) -> 매 순간 현재 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
+// 예: Run(Parallel({Move(0,{1,0,0},.0f,2.0f),Scale(0,Axis::X,.5f,Pivot::Center,.0f,2.0f)}));
 //     2초 동안 X방향으로 1만큼 이동하며 X방향 크기를 1.5배로 늘립니다. 신축은 이동 거리를 바꾸지 않습니다.
-// 예: Scale(0,Axis::Y,-.5f,Pivot::Bottom,2.0f) -> 아래 면 중심을 기준으로 2초 동안 Y방향 크기를 절반으로 줄입니다.
-// 예: Scale(0,Axis::X,1.0f,Point(0,0,0),1.0f) -> 1초 동안 X방향 크기와 원점에서의 X방향 거리를 두 배로 만듭니다.
+// 예: Scale(0,Axis::Y,-.5f,Pivot::Bottom,.0f,2.0f) -> 아래 면 중심을 기준으로 2초 동안 Y방향 크기를 절반으로 줄입니다.
+// 예: Scale(0,Axis::X,1.0f,Point(0,0,0),.0f,1.0f) -> 1초 동안 X방향 크기와 원점에서의 X방향 거리를 두 배로 만듭니다.
+// Scale(3,Axis::Y,.5f,Pivot::Bottom,.0f,2.0f): 대기 없이 2초간 신축합니다.
+Command Scale(int id,Axis axis,float change,Pivot pivot,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Scale;c.id=id;c.axis=axis;c.amount=change;c.pivot=pivot;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Scale(int id,Axis axis,float change,Pivot pivot=Pivot::Center,float seconds=0)
 {
-    Command c;c.kind=Kind::Scale;c.id=id;c.axis=axis;c.amount=change;c.pivot=pivot;c.seconds=seconds;return c;
+    return Scale(id,axis,change,pivot,0,seconds);
 }
 // 변환의 마지막 인자는 편도 시간(초)입니다. 생략하거나 0이면 기존 속도로 계산합니다.
-// PingPong은 같은 시간 동안 돌아오므로 한 주기는 지정 시간의 두 배입니다.
-// Swap(번호1,번호2,시간,방식): 지정한 초 동안 두 중심 위치를 교환합니다. 방식 생략 시 직선입니다.
+// PingPong은 처음 한 번 대기한 뒤 편도 시간만큼 갔다가 즉시 돌아옵니다.
+// Repeat로 감싸면 새 반복을 시작할 때 대기 시간도 다시 적용됩니다.
+// Swap(번호1,번호2,대기 시간,실행 시간,방식): 지정한 초 동안 두 중심 위치를 교환합니다. 방식 생략 시 직선입니다.
 // 회전과 크기는 유지합니다. 서로 다른 활성 객체와 양수 시간을 지정합니다.
 // ArcXZ는 중점 주위 XZ 반원, DetourXZ/DetourXY는 각 평면의 ㄷ자 경로입니다.
 // ㄷ자 우회 거리는 두 중심 거리의 절반이며 두 객체는 서로 반대쪽으로 우회합니다.
-Command Swap(int first,int second,float seconds,SwapMode mode=SwapMode::Direct)
+// Swap(번호1,번호2,대기 시간,실행 시간,방식)으로 교환을 늦게 시작할 수 있습니다.
+Command Swap(int first,int second,float delay,float seconds,SwapMode mode=SwapMode::Direct)
 {
     Command c;c.kind=Kind::Swap;c.seconds=seconds;c.swapMode=mode;
+    c.delay=c.remainingDelay=delay;
     c.children={Move(first,glm::vec3(0),seconds),Move(second,glm::vec3(0),seconds)};
     return c;
 }
-// Parallel({명령,...}): 모두 동시에 시작하고 가장 긴 명령이 끝나면 완료합니다.
+Command Swap(int first,int second,float seconds,SwapMode mode=SwapMode::Direct)
+{
+    return Swap(first,second,0,seconds,mode);
+}
+// Parallel({명령,...}): 각 명령의 대기 시간은 함께 흐르며, 모든 명령이 끝나야 완료합니다.
 Command Parallel(initializer_list<Command> commands)
 {
     Command c;c.kind=Kind::Parallel;c.children=commands;return c;
@@ -593,6 +623,7 @@ glm::vec3 AxisVector(Axis axis)
 // Validate: 잘못된 설정은 화면을 깨뜨리지 않고 콘솔 오류로 알립니다.
 void Validate(const Command& c)
 {
+    if(!isfinite(c.delay) || c.delay<0)throw runtime_error("Delay must be finite and nonnegative");
     if(c.kind==Kind::Swap)
     {
         if(!isfinite(c.seconds) || c.seconds<=0)throw runtime_error("Swap duration must be finite and positive");
@@ -669,6 +700,7 @@ void Rewind(Command& c)
 {
     c.started=c.done=c.backward=false;
     c.elapsed=c.previous=0;c.index=c.cycles=0;
+    c.remainingDelay=c.delay;
     for(auto& child:c.children)Rewind(child);
 }
 
@@ -703,6 +735,14 @@ glm::vec3 SwapPosition(const Command& c,int index,float progress)
 float Advance(Command& c,float dt)
 {
     if(c.done)return dt;
+    if(c.remainingDelay>0)
+    {
+        // 대기를 끝내고 남은 시간으로 변환을 시작합니다. 기준점도 이때 기록합니다.
+        float waiting=glm::min(dt,c.remainingDelay);
+        c.remainingDelay-=waiting;
+        dt-=waiting;
+        if(c.remainingDelay>0)return 0;
+    }
     if(c.kind==Kind::Swap)
     {
         if(!c.started)
@@ -856,8 +896,8 @@ int main()
     ResetScene();
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
-    cout << "Arrows: assembly | x/X,z/Z: camera axes | y/Y: orbit\n"
-         << "v/b/n/m: walk | Space: jump | a~l: custom commands | w: wire | t: projection | e: hidden surfaces\n"
+    cout << "Arrows: custom | x/X,z/Z: camera axes | y/Y: orbit\n"
+         << "v/b/n/m: walk | Space: jump | a~l,0~9: custom commands | w: wire | t: projection | e: hidden surfaces\n"
          << "r: reset | q: quit | drag/wheel: camera" << endl;
 	double previousTime = glfwGetTime();
 	while (!glfwWindowShouldClose(window)) {
@@ -933,8 +973,8 @@ void ResetScene()
     // Point(0,.2f,0)처럼 면 중심 대신 각 부품의 중심에서 잰 위치를 지정할 수 있습니다.
     // FollowLag 사용 전 Attach로 부모를 지정하세요. 연결점 생략형 Attach도 사용할 수 있습니다.
     // 반응 시간을 늘리면 기울어진 상태가 오래 남습니다. 수평을 유지할 손에는 FollowLag를 생략합니다.
-    // 변환 예: Run(Move(20,{1,0,0},1.0f)); // 자식에게 이동 명령을 다시 줄 필요 없이 따라옵니다.
-    // 연결점을 미는 예: Run(Move(21,{.2f,0,0},.5f)); // 21번 연결점을 부모 기준 +X로 이동
+    // 변환 예: Run(Move(20,{1,0,0},.0f,1.0f)); // 자식에게 이동 명령을 다시 줄 필요 없이 따라옵니다.
+    // 연결점을 미는 예: Run(Move(21,{.2f,0,0},.0f,.5f)); // 21번 연결점을 부모 기준 +X로 이동
     EvaluateHierarchy();
     playerInitialFoot=1e20f;
     for(int id=0;id<BOX_COUNT;++id)
@@ -958,6 +998,8 @@ void UpdateScene(GLFWwindow* window,float dt)
         UpdatePlayer(step);
     }
     EvaluateHierarchy();
+    // 시험용 방향키는 CustomKey에서 설정합니다. 전체 이동이 필요하면 아래 주석을 풉니다.
+    /*
     glm::vec3 movement(0);
     if(glfwGetKey(window,GLFW_KEY_LEFT)==GLFW_PRESS)movement.x-=1;
     if(glfwGetKey(window,GLFW_KEY_RIGHT)==GLFW_PRESS)movement.x+=1;
@@ -990,7 +1032,8 @@ void UpdateScene(GLFWwindow* window,float dt)
             assemblyPosition+=movement;
         }
     }
-    // 전체 방향키 이동까지 반영한 뒤 지연 시간을 한 번만 진행합니다.
+    */
+    // 지연 효과의 시간을 프레임마다 한 번만 진행합니다.
     EvaluateHierarchy(dt);
     // 카메라 로컬 +X는 오른쪽, 로컬 +Z는 뒤쪽입니다. Shift는 음의 방향입니다.
     glm::vec3 forward=glm::normalize(cameraTarget-cameraPosition);
@@ -1073,20 +1116,20 @@ void DrawScene(int width,int height)
 // Move/Rotate/Scale/Swap은 명령을 만들며, Run(명령)을 호출해야 실행됩니다.
 // Attach/FollowLag는 설정 함수이므로 Run으로 감싸지 않습니다.
 //
-// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},시간));
-//    Run(Move(0,{1,0,0},2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
+// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},대기 시간,실행 시간));
+//    Run(Move(0,{1,0,0},.0f,2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
 //    좌표는 목적지가 아니라 상대 이동량입니다. 부모가 있으면 부모 좌표계 기준입니다.
 //    연결점 지정형 Attach는 부모 연결점 offset을 이동하고, 생략형은 부모 기준 상대 위치를 이동합니다.
 //
-// 2) 회전: Run(Rotate(번호,축,각도,기준점,시간));
-//    Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f)); // 현재 중심에서 90도 자전
-//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),2.0f)); // 조립 공간 원점 주위 공전
+// 2) 회전: Run(Rotate(번호,축,각도,기준점,대기 시간,실행 시간));
+//    Run(Rotate(0,Axis::Y,90,Pivot::Center,.0f,2.0f)); // 현재 중심에서 90도 자전
+//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),.0f,2.0f)); // 조립 공간 원점 주위 공전
 //    각도는 현재 상태에 추가하는 도 단위 값(-360~360), 양수는 오른손 법칙입니다.
 //    Axis::X/Y/Z는 조립 공간의 고정 축이며, 부모가 있으면 부모 좌표계의 축입니다.
 //    Center는 이동 중인 중심을 계속 따라갑니다. 객체 자체의 회전된 로컬 축은 아닙니다.
 //
-// 3) 신축: Run(Scale(번호,축,배율증감,기준점,시간));
-//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 아래 면 기준 높이를 1.5배
+// 3) 신축: Run(Scale(번호,축,배율증감,기준점,대기 시간,실행 시간));
+//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f)); // 아래 면 기준 높이를 1.5배
 //    최종 배율 = 1 + 배율증감: .5는 1.5배, 1은 2배, -.5는 절반. -1 이하는 금지.
 //    Center는 현재 중심을 따라가므로 이동과 함께 써도 신축 때문에 중심이 밀리지 않습니다.
 //    축은 회전과 마찬가지로 조립/부모 공간 기준입니다. 기울어진 객체는 비스듬히 변형될 수 있습니다.
@@ -1096,7 +1139,7 @@ void DrawScene(int width,int height)
 //    회전/신축의 면 기준점은 시작할 때 계산하여 고정합니다. Center만 현재 중심을 따라갑니다.
 //    변환의 Point는 조립/부모 공간 좌표입니다. 조립 공간 전체 이동 시 함께 움직입니다.
 //    시간을 지정할 때는 Rotate/Scale의 기준점 인자도 반드시 작성합니다.
-//    시간 생략 또는 0은 즉시 실행이 아니라 MOVE_SPEED/ROTATE_SPEED/SCALE_SPEED로 계산합니다.
+//    대기 시간 .0f는 즉시 시작입니다. Move/Rotate/Scale의 실행 시간 .0f는 기본 속도로 계산합니다.
 //
 // 5) 연결: Attach(부모번호,자식번호,부모연결점,자식연결점,방향상속,신축상속);
 //    Attach(0,1,Pivot::Bottom,Pivot::Top); // 부모 아래와 자식 위를 맞붙임
@@ -1122,34 +1165,34 @@ void DrawScene(int width,int height)
 //    최대기울기는 0 이상 90도 미만입니다. 연결점이 중심이면 기울기 효과는 없습니다.
 //    최대기울기 0으로 효과를 끕니다. 물리 충돌 계산이 아닌 따라 흔들리는 효과입니다.
 //
-// 7) 위치 교환: Run(Swap(번호1,번호2,시간,방식));
-//    Run(Swap(0,1,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
+// 7) 위치 교환: Run(Swap(번호1,번호2,대기 시간,실행 시간,방식));
+//    Run(Swap(0,1,.0f,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
 //    Direct: 직선(기본), ArcXZ: XZ 반원, DetourXZ: XZ ㄷ자, DetourXY: XY ㄷ자
 //    서로 다른 활성 객체, 같은 부모와 inheritScale 설정, 양수 시간이 필요합니다.
 //    연결점 지정형 Attach는 Swap 불가입니다. 생략형은 같은 부모/신축상속 조건이면 가능합니다.
 //
 // 8) 조합: Parallel은 동시 실행, Sequence는 앞 명령 완료 후 다음 실행입니다.
-//    Run(Parallel({Move(0,{1,0,0},2),Rotate(0,Axis::Y,90,Pivot::Center,2)}));
-//    Run(Sequence({Move(0,{1,0,0},1),Rotate(0,Axis::Y,90,Pivot::Center,1)}));
+//    Run(Parallel({Move(0,{1,0,0},.0f,2.0f),Rotate(0,Axis::Y,90,Pivot::Center,.0f,2.0f)}));
+//    Run(Sequence({Move(0,{1,0,0},.0f,1.0f),Rotate(0,Axis::Y,90,Pivot::Center,.0f,1.0f)}));
 //    같은 객체의 동시 변환은 하나의 Run(Parallel({...}))로 묶습니다.
 //    다른 Run이 같은 객체를 사용 중이면 일시정지 상태라도 새 작업을 시작할 수 없습니다.
 //
 // 9) 반복/왕복: Repeat(명령,횟수), 무한반복은 Forever입니다.
-//    Run(Repeat(Move(0,{.2f,0,0},1),3)); // 총 +X .6 이동: 상대 변환이 누적됨
-//    Run(Repeat(PingPong(Move(0,{1,0,0},1)),Forever)); // 1초 이동 + 1초 복귀
+//    Run(Repeat(Move(0,{.2f,0,0},.0f,1.0f),3)); // 총 +X .6 이동: 상대 변환이 누적됨
+//    Run(Repeat(PingPong(Move(0,{1,0,0},.0f,1.0f)),Forever)); // 1초 이동 + 1초 복귀
 //    PingPong에는 Move/Rotate/Scale 한 개만 넣습니다. Parallel/Swap은 직접 넣지 않습니다.
 //    두 객체가 같은 주기로 신축: 각각 편도 1초, 왕복 2초로 맞춥니다.
 //    slots[0]=Run(Repeat(Parallel({
-//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),
-//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,1.0f))
+//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f)),
+//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f))
 //    }),Forever));
 //    Repeat는 시간을 자동으로 맞추지 않습니다. 각 변환의 시간을 같게 지정하세요.
-//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
+//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,.0f,2.0f,SwapMode::ArcXZ),Forever));
 //    신축만 Repeat하면 계속 커집니다. 크기 복귀가 필요하면 PingPong을 사용하세요.
 //
 // 10) 키를 다시 누르면 일시정지/재개하는 기본 형태:
 //    if(IsFinished(slots[0]))
-//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},1.0f)),Forever));
+//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},.0f,1.0f)),Forever));
 //    else TogglePause(slots[0]);
 //    slots에는 객체 번호가 아니라 Run이 반환한 작업 번호를 저장합니다.
 //    Pause/Resume/TogglePause/Cancel은 작업 전체에 적용합니다.
@@ -1164,14 +1207,14 @@ void DrawScene(int width,int height)
 // if(IsFinished(slots[0])) {
 //     slots[0]=Run(Repeat(Sequence({
 //         Parallel({
-//             PingPong(Move(0,{0,.5f,0},1.0f)),
-//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,1.0f)),
-//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,1.0f)),
-//             PingPong(Move(1,{0,.5f,0},1.0f)),
-//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,1.0f)),
-//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,1.0f))
+//             PingPong(Move(0,{0,.5f,0},.0f,1.0f)),
+//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,.0f,1.0f)),
+//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,.0f,1.0f)),
+//             PingPong(Move(1,{0,.5f,0},.0f,1.0f)),
+//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,.0f,1.0f)),
+//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,.0f,1.0f))
 //         }),
-//         Swap(0,1,2.0f,SwapMode::ArcXZ)
+//         Swap(0,1,.0f,2.0f,SwapMode::ArcXZ)
 //     }),Forever));
 // } else {
 //     TogglePause(slots[0]);
@@ -1192,7 +1235,7 @@ void DrawScene(int width,int height)
 //     if(action==GLFW_PRESS) {
 //         if(IsFinished(slots[0])) {
 //             slots[0]=Run(Repeat(
-//                 Rotate(0,Axis::Y,360,Pivot::Center,4.0f),
+//                 Rotate(0,Axis::Y,360,Pivot::Center,.0f,4.0f),
 //                 Forever
 //             ));
 //         } else {
@@ -1254,6 +1297,39 @@ void CustomKey(int key)
     case GLFW_KEY_L:
         // l 명령
         break;
+
+    // 키보드 윗줄의 숫자키입니다. 각 블록에서 Run 등을 한 번 호출할 수 있습니다.
+    case GLFW_KEY_0:
+    {
+        // 숫자 0 명령
+        break;
+    }
+    case GLFW_KEY_1:
+    {
+        // 숫자 1 명령
+        break;
+    }
+
+    case GLFW_KEY_UP:
+    {
+        // 위 방향키 명령
+        break;
+    }
+    case GLFW_KEY_DOWN:
+    {
+        // 아래 방향키 명령
+        break;
+    }
+    case GLFW_KEY_LEFT:
+    {
+        // 왼쪽 방향키 명령
+        break;
+    }
+    case GLFW_KEY_RIGHT:
+    {
+        // 오른쪽 방향키 명령
+        break;
+    }
     }
 }
 
@@ -1426,7 +1502,7 @@ using namespace std;
 #define BACKGROUND_BLUE 1.0f
 
 // 인형뽑기 크기와 동작 설정
-#define CLAW_COUNT 2          // 몸체 둘레의 집게발 수: 2, 3, 4
+#define CLAW_COUNT 2         // 몸체 둘레의 집게발 수: 2, 3, 4
 #define CLAW_SEGMENT_COUNT 2  // 집게발 한 쪽의 육면체 수: 1, 2
 #define CLAW_CEILING_Y 2.50f
 #define CLAW_CEILING_THICKNESS .06f
@@ -1592,6 +1668,7 @@ struct Command
     Axis axis=Axis::Y;
     Pivot pivot=Pivot::Center;
     float amount=0,elapsed=0,duration=0,previous=0,seconds=0;
+    float delay=0,remainingDelay=0;
     bool started=false,done=false,backward=false;
     SwapMode swapMode=SwapMode::Direct;
     glm::vec3 swapStart[2]{glm::vec3(0),glm::vec3(0)};
@@ -1873,12 +1950,20 @@ void UpdatePlayer(float dt)
     PosePlayer();
 }
 
-// Move(번호,{dx,dy,dz},시간): 해당 단계 시작 위치에서 상대 이동합니다. 시간은 초 단위입니다.
+// 끝에 시간 하나를 쓰면 실행 시간, 두 개를 쓰면 대기 시간과 실행 시간입니다. 단위는 초입니다.
+// Move(3,{1,0,0},.0f,2.0f): 즉시 시작해 2초간 이동합니다.
+// 대기 시간은 .0f로 두면 변환을 바로 시작합니다.
+Command Move(int id,glm::vec3 delta,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Move;c.id=id;c.delta=delta;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Move(int id,glm::vec3 delta,float seconds=0)
 {
-    Command c;c.kind=Kind::Move;c.id=id;c.delta=delta;c.seconds=seconds;return c;
+    return Move(id,delta,0,seconds);
 }
-// Rotate(번호,축,각도,기준점,시간): -360~+360도. 기준점 생략 시 자기 중심.
+// Rotate(번호,축,각도,기준점,대기 시간,실행 시간): -360~+360도. 기준점 생략 시 자기 중심.
 // Center 회전은 매 순간 현재 중심을 따라갑니다. 이동이나 공전과 함께 실행해도 제자리 자전합니다.
 // 축 방향은 부모가 없으면 조립 공간의 고정 축, 있으면 부모를 따라 회전하는 축입니다.
 // Point는 지정 좌표, 면 기준점은 회전 시작 시의 위치를 계속 사용합니다.
@@ -1894,15 +1979,22 @@ Command Move(int id,glm::vec3 delta,float seconds=0)
 //    방향키 전체 이동은 조립 공간 전체에 적용되므로 Point 기준점도 함께 이동합니다.
 // 5. 시간(생략 가능): 편도 실행 시간(초). 양수를 넣으면 회전 속도는 각도/시간으로 정해집니다.
 //    생략하거나 0이면 ROTATE_SPEED를 사용합니다. 음수는 허용하지 않습니다.
-//    시간을 지정하려면 앞의 기준점도 적어야 합니다. PingPong으로 감싸면 왕복 시간은 두 배입니다.
-// 예: Rotate(0,Axis::X,90) -> 현재 중심에서 고정 X축 방향으로 +90도 자전합니다.
-// 예: Rotate(0,Axis::Y,-180,Point(0,0,0),2.0f) -> 원점을 지나는 Y축 주위로 2초 동안 -180도 공전합니다.
-// 예: Rotate(0,Axis::Z,45,Pivot::Top,1.0f) -> 시작 시 윗면 중심을 지나는 Z축 주위로 1초 동안 +45도 회전합니다.
+//    시간을 지정하려면 기준점도 적습니다. PingPong의 한 주기는 대기 시간 + 편도 실행 시간의 두 배입니다.
+// 예: Rotate(0,Axis::X,90,Pivot::Center,.0f,.0f) -> 현재 중심에서 고정 X축 방향으로 +90도 자전합니다.
+// 예: Rotate(0,Axis::Y,-180,Point(0,0,0),.0f,2.0f) -> 원점을 지나는 Y축 주위로 2초 동안 -180도 공전합니다.
+// 예: Rotate(0,Axis::Z,45,Pivot::Top,.0f,1.0f) -> 시작 시 윗면 중심을 지나는 Z축 주위로 1초 동안 +45도 회전합니다.
+// Rotate(3,Axis::Y,90,Pivot::Center,.0f,2.0f): 대기 없이 2초간 회전합니다.
+Command Rotate(int id,Axis axis,float degrees,Pivot pivot,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float seconds=0)
 {
-    Command c;c.kind=Kind::Rotate;c.id=id;c.axis=axis;c.amount=degrees;c.pivot=pivot;c.seconds=seconds;return c;
+    return Rotate(id,axis,degrees,pivot,0,seconds);
 }
-// Scale(번호,축,배율증감,기준점,시간): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
+// Scale(번호,축,배율증감,기준점,대기 시간,실행 시간): +0.5는 1.5배, -0.5는 0.5배. -1 이하는 거부.
 // 부모가 없으면 조립 공간 축, 있으면 부모 좌표계 축으로 신축합니다. 기본 기준점은 자기 중심.
 // 부모가 있는 경우 아래 설명의 조립 공간은 해당 부모 좌표계를 뜻합니다.
 // 1. 번호: boxSettings의 객체 번호(0~BOX_COUNT-1). 활성화된 객체만 화면에서 변환됩니다.
@@ -1919,28 +2011,42 @@ Command Rotate(int id,Axis axis,float degrees,Pivot pivot=Pivot::Center,float se
 // 5. 시간(생략 가능): 편도 실행 시간(초). 생략하거나 0이면 abs(배율증감)/SCALE_SPEED초가 걸립니다.
 //    양수 시간을 지정하면 해당 시간에 신축을 완료합니다. 음수는 허용하지 않습니다.
 //    시간을 지정하려면 기준점도 적어야 합니다. PingPong은 같은 시간 동안 원래 크기로 돌아옵니다.
-// 예: Scale(0,Axis::X,.5f) -> 매 순간 현재 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
-// 예: Run(Parallel({Move(0,{1,0,0},2.0f),Scale(0,Axis::X,.5f,Pivot::Center,2.0f)}));
+// 예: Scale(0,Axis::X,.5f,Pivot::Center,.0f,.0f) -> 매 순간 현재 중심을 기준으로 X방향 크기를 현재의 1.5배로 늘립니다.
+// 예: Run(Parallel({Move(0,{1,0,0},.0f,2.0f),Scale(0,Axis::X,.5f,Pivot::Center,.0f,2.0f)}));
 //     2초 동안 X방향으로 1만큼 이동하며 X방향 크기를 1.5배로 늘립니다. 신축은 이동 거리를 바꾸지 않습니다.
-// 예: Scale(0,Axis::Y,-.5f,Pivot::Bottom,2.0f) -> 아래 면 중심을 기준으로 2초 동안 Y방향 크기를 절반으로 줄입니다.
-// 예: Scale(0,Axis::X,1.0f,Point(0,0,0),1.0f) -> 1초 동안 X방향 크기와 원점에서의 X방향 거리를 두 배로 만듭니다.
+// 예: Scale(0,Axis::Y,-.5f,Pivot::Bottom,.0f,2.0f) -> 아래 면 중심을 기준으로 2초 동안 Y방향 크기를 절반으로 줄입니다.
+// 예: Scale(0,Axis::X,1.0f,Point(0,0,0),.0f,1.0f) -> 1초 동안 X방향 크기와 원점에서의 X방향 거리를 두 배로 만듭니다.
+// Scale(3,Axis::Y,.5f,Pivot::Bottom,.0f,2.0f): 대기 없이 2초간 신축합니다.
+Command Scale(int id,Axis axis,float change,Pivot pivot,float delay,float seconds)
+{
+    Command c;c.kind=Kind::Scale;c.id=id;c.axis=axis;c.amount=change;c.pivot=pivot;c.seconds=seconds;
+    c.delay=c.remainingDelay=delay;
+    return c;
+}
 Command Scale(int id,Axis axis,float change,Pivot pivot=Pivot::Center,float seconds=0)
 {
-    Command c;c.kind=Kind::Scale;c.id=id;c.axis=axis;c.amount=change;c.pivot=pivot;c.seconds=seconds;return c;
+    return Scale(id,axis,change,pivot,0,seconds);
 }
 // 변환의 마지막 인자는 편도 시간(초)입니다. 생략하거나 0이면 기존 속도로 계산합니다.
-// PingPong은 같은 시간 동안 돌아오므로 한 주기는 지정 시간의 두 배입니다.
-// Swap(번호1,번호2,시간,방식): 지정한 초 동안 두 중심 위치를 교환합니다. 방식 생략 시 직선입니다.
+// PingPong은 처음 한 번 대기한 뒤 편도 시간만큼 갔다가 즉시 돌아옵니다.
+// Repeat로 감싸면 새 반복을 시작할 때 대기 시간도 다시 적용됩니다.
+// Swap(번호1,번호2,대기 시간,실행 시간,방식): 지정한 초 동안 두 중심 위치를 교환합니다. 방식 생략 시 직선입니다.
 // 회전과 크기는 유지합니다. 서로 다른 활성 객체와 양수 시간을 지정합니다.
 // ArcXZ는 중점 주위 XZ 반원, DetourXZ/DetourXY는 각 평면의 ㄷ자 경로입니다.
 // ㄷ자 우회 거리는 두 중심 거리의 절반이며 두 객체는 서로 반대쪽으로 우회합니다.
-Command Swap(int first,int second,float seconds,SwapMode mode=SwapMode::Direct)
+// Swap(번호1,번호2,대기 시간,실행 시간,방식)으로 교환을 늦게 시작할 수 있습니다.
+Command Swap(int first,int second,float delay,float seconds,SwapMode mode=SwapMode::Direct)
 {
     Command c;c.kind=Kind::Swap;c.seconds=seconds;c.swapMode=mode;
+    c.delay=c.remainingDelay=delay;
     c.children={Move(first,glm::vec3(0),seconds),Move(second,glm::vec3(0),seconds)};
     return c;
 }
-// Parallel({명령,...}): 모두 동시에 시작하고 가장 긴 명령이 끝나면 완료합니다.
+Command Swap(int first,int second,float seconds,SwapMode mode=SwapMode::Direct)
+{
+    return Swap(first,second,0,seconds,mode);
+}
+// Parallel({명령,...}): 각 명령의 대기 시간은 함께 흐르며, 모든 명령이 끝나야 완료합니다.
 Command Parallel(initializer_list<Command> commands)
 {
     Command c;c.kind=Kind::Parallel;c.children=commands;return c;
@@ -1970,6 +2076,7 @@ glm::vec3 AxisVector(Axis axis)
 // Validate: 잘못된 설정은 화면을 깨뜨리지 않고 콘솔 오류로 알립니다.
 void Validate(const Command& c)
 {
+    if(!isfinite(c.delay) || c.delay<0)throw runtime_error("Delay must be finite and nonnegative");
     if(c.kind==Kind::Swap)
     {
         if(!isfinite(c.seconds) || c.seconds<=0)throw runtime_error("Swap duration must be finite and positive");
@@ -2046,6 +2153,7 @@ void Rewind(Command& c)
 {
     c.started=c.done=c.backward=false;
     c.elapsed=c.previous=0;c.index=c.cycles=0;
+    c.remainingDelay=c.delay;
     for(auto& child:c.children)Rewind(child);
 }
 
@@ -2080,6 +2188,14 @@ glm::vec3 SwapPosition(const Command& c,int index,float progress)
 float Advance(Command& c,float dt)
 {
     if(c.done)return dt;
+    if(c.remainingDelay>0)
+    {
+        // 대기를 끝내고 남은 시간으로 변환을 시작합니다. 기준점도 이때 기록합니다.
+        float waiting=glm::min(dt,c.remainingDelay);
+        c.remainingDelay-=waiting;
+        dt-=waiting;
+        if(c.remainingDelay>0)return 0;
+    }
     if(c.kind==Kind::Swap)
     {
         if(!c.started)
@@ -2436,20 +2552,20 @@ void DrawScene(int width,int height)
 // Move/Rotate/Scale/Swap은 명령을 만들며, Run(명령)을 호출해야 실행됩니다.
 // Attach/FollowLag는 설정 함수이므로 Run으로 감싸지 않습니다.
 //
-// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},시간));
-//    Run(Move(0,{1,0,0},2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
+// 1) 이동: Run(Move(번호,{X이동량,Y이동량,Z이동량},대기 시간,실행 시간));
+//    Run(Move(0,{1,0,0},.0f,2.0f)); // 현재 위치에서 +X로 1만큼, 2초 동안 이동
 //    좌표는 목적지가 아니라 상대 이동량입니다. 부모가 있으면 부모 좌표계 기준입니다.
 //    연결점 지정형 Attach는 부모 연결점 offset을 이동하고, 생략형은 부모 기준 상대 위치를 이동합니다.
 //
-// 2) 회전: Run(Rotate(번호,축,각도,기준점,시간));
-//    Run(Rotate(0,Axis::Y,90,Pivot::Center,2.0f)); // 현재 중심에서 90도 자전
-//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),2.0f)); // 조립 공간 원점 주위 공전
+// 2) 회전: Run(Rotate(번호,축,각도,기준점,대기 시간,실행 시간));
+//    Run(Rotate(0,Axis::Y,90,Pivot::Center,.0f,2.0f)); // 현재 중심에서 90도 자전
+//    Run(Rotate(0,Axis::Y,180,Point(0,0,0),.0f,2.0f)); // 조립 공간 원점 주위 공전
 //    각도는 현재 상태에 추가하는 도 단위 값(-360~360), 양수는 오른손 법칙입니다.
 //    Axis::X/Y/Z는 조립 공간의 고정 축이며, 부모가 있으면 부모 좌표계의 축입니다.
 //    Center는 이동 중인 중심을 계속 따라갑니다. 객체 자체의 회전된 로컬 축은 아닙니다.
 //
-// 3) 신축: Run(Scale(번호,축,배율증감,기준점,시간));
-//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)); // 아래 면 기준 높이를 1.5배
+// 3) 신축: Run(Scale(번호,축,배율증감,기준점,대기 시간,실행 시간));
+//    Run(Scale(0,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f)); // 아래 면 기준 높이를 1.5배
 //    최종 배율 = 1 + 배율증감: .5는 1.5배, 1은 2배, -.5는 절반. -1 이하는 금지.
 //    Center는 현재 중심을 따라가므로 이동과 함께 써도 신축 때문에 중심이 밀리지 않습니다.
 //    축은 회전과 마찬가지로 조립/부모 공간 기준입니다. 기울어진 객체는 비스듬히 변형될 수 있습니다.
@@ -2459,7 +2575,7 @@ void DrawScene(int width,int height)
 //    회전/신축의 면 기준점은 시작할 때 계산하여 고정합니다. Center만 현재 중심을 따라갑니다.
 //    변환의 Point는 조립/부모 공간 좌표입니다. 조립 공간 전체 이동 시 함께 움직입니다.
 //    시간을 지정할 때는 Rotate/Scale의 기준점 인자도 반드시 작성합니다.
-//    시간 생략 또는 0은 즉시 실행이 아니라 MOVE_SPEED/ROTATE_SPEED/SCALE_SPEED로 계산합니다.
+//    대기 시간 .0f는 즉시 시작입니다. Move/Rotate/Scale의 실행 시간 .0f는 기본 속도로 계산합니다.
 //
 // 5) 연결: Attach(부모번호,자식번호,부모연결점,자식연결점,방향상속,신축상속);
 //    Attach(0,1,Pivot::Bottom,Pivot::Top); // 부모 아래와 자식 위를 맞붙임
@@ -2485,34 +2601,34 @@ void DrawScene(int width,int height)
 //    최대기울기는 0 이상 90도 미만입니다. 연결점이 중심이면 기울기 효과는 없습니다.
 //    최대기울기 0으로 효과를 끕니다. 물리 충돌 계산이 아닌 따라 흔들리는 효과입니다.
 //
-// 7) 위치 교환: Run(Swap(번호1,번호2,시간,방식));
-//    Run(Swap(0,1,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
+// 7) 위치 교환: Run(Swap(번호1,번호2,대기 시간,실행 시간,방식));
+//    Run(Swap(0,1,.0f,2.0f,SwapMode::ArcXZ)); // 자세와 크기는 유지하며 위치 교환
 //    Direct: 직선(기본), ArcXZ: XZ 반원, DetourXZ: XZ ㄷ자, DetourXY: XY ㄷ자
 //    서로 다른 활성 객체, 같은 부모와 inheritScale 설정, 양수 시간이 필요합니다.
 //    연결점 지정형 Attach는 Swap 불가입니다. 생략형은 같은 부모/신축상속 조건이면 가능합니다.
 //
 // 8) 조합: Parallel은 동시 실행, Sequence는 앞 명령 완료 후 다음 실행입니다.
-//    Run(Parallel({Move(0,{1,0,0},2),Rotate(0,Axis::Y,90,Pivot::Center,2)}));
-//    Run(Sequence({Move(0,{1,0,0},1),Rotate(0,Axis::Y,90,Pivot::Center,1)}));
+//    Run(Parallel({Move(0,{1,0,0},.0f,2.0f),Rotate(0,Axis::Y,90,Pivot::Center,.0f,2.0f)}));
+//    Run(Sequence({Move(0,{1,0,0},.0f,1.0f),Rotate(0,Axis::Y,90,Pivot::Center,.0f,1.0f)}));
 //    같은 객체의 동시 변환은 하나의 Run(Parallel({...}))로 묶습니다.
 //    다른 Run이 같은 객체를 사용 중이면 일시정지 상태라도 새 작업을 시작할 수 없습니다.
 //
 // 9) 반복/왕복: Repeat(명령,횟수), 무한반복은 Forever입니다.
-//    Run(Repeat(Move(0,{.2f,0,0},1),3)); // 총 +X .6 이동: 상대 변환이 누적됨
-//    Run(Repeat(PingPong(Move(0,{1,0,0},1)),Forever)); // 1초 이동 + 1초 복귀
+//    Run(Repeat(Move(0,{.2f,0,0},.0f,1.0f),3)); // 총 +X .6 이동: 상대 변환이 누적됨
+//    Run(Repeat(PingPong(Move(0,{1,0,0},.0f,1.0f)),Forever)); // 1초 이동 + 1초 복귀
 //    PingPong에는 Move/Rotate/Scale 한 개만 넣습니다. Parallel/Swap은 직접 넣지 않습니다.
 //    두 객체가 같은 주기로 신축: 각각 편도 1초, 왕복 2초로 맞춥니다.
 //    slots[0]=Run(Repeat(Parallel({
-//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,1.0f)),
-//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,1.0f))
+//        PingPong(Scale(0,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f)),
+//        PingPong(Scale(1,Axis::Y,.5f,Pivot::Bottom,.0f,1.0f))
 //    }),Forever));
 //    Repeat는 시간을 자동으로 맞추지 않습니다. 각 변환의 시간을 같게 지정하세요.
-//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,2.0f,SwapMode::ArcXZ),Forever));
+//    스왑 반복: slots[0]=Run(Repeat(Swap(0,1,.0f,2.0f,SwapMode::ArcXZ),Forever));
 //    신축만 Repeat하면 계속 커집니다. 크기 복귀가 필요하면 PingPong을 사용하세요.
 //
 // 10) 키를 다시 누르면 일시정지/재개하는 기본 형태:
 //    if(IsFinished(slots[0]))
-//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},1.0f)),Forever));
+//        slots[0]=Run(Repeat(PingPong(Move(0,{1,0,0},.0f,1.0f)),Forever));
 //    else TogglePause(slots[0]);
 //    slots에는 객체 번호가 아니라 Run이 반환한 작업 번호를 저장합니다.
 //    Pause/Resume/TogglePause/Cancel은 작업 전체에 적용합니다.
@@ -2527,14 +2643,14 @@ void DrawScene(int width,int height)
 // if(IsFinished(slots[0])) {
 //     slots[0]=Run(Repeat(Sequence({
 //         Parallel({
-//             PingPong(Move(0,{0,.5f,0},1.0f)),
-//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,1.0f)),
-//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,1.0f)),
-//             PingPong(Move(1,{0,.5f,0},1.0f)),
-//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,1.0f)),
-//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,1.0f))
+//             PingPong(Move(0,{0,.5f,0},.0f,1.0f)),
+//             PingPong(Rotate(0,Axis::Y,90,Pivot::Center,.0f,1.0f)),
+//             PingPong(Scale(0,Axis::Y,.5f,Pivot::Center,.0f,1.0f)),
+//             PingPong(Move(1,{0,.5f,0},.0f,1.0f)),
+//             PingPong(Rotate(1,Axis::Y,-90,Pivot::Center,.0f,1.0f)),
+//             PingPong(Scale(1,Axis::X,.5f,Pivot::Center,.0f,1.0f))
 //         }),
-//         Swap(0,1,2.0f,SwapMode::ArcXZ)
+//         Swap(0,1,.0f,2.0f,SwapMode::ArcXZ)
 //     }),Forever));
 // } else {
 //     TogglePause(slots[0]);
@@ -2555,7 +2671,7 @@ void DrawScene(int width,int height)
 //     if(action==GLFW_PRESS) {
 //         if(IsFinished(slots[0])) {
 //             slots[0]=Run(Repeat(
-//                 Rotate(0,Axis::Y,360,Pivot::Center,4.0f),
+//                 Rotate(0,Axis::Y,360,Pivot::Center,.0f,4.0f),
 //                 Forever
 //             ));
 //         } else {
@@ -3379,3 +3495,27 @@ bool InitShader()
 #else
 #error MID_TEST_EXAMPLE must be 0, 1, or 2
 #endif
+
+// 시험용 셰이더 복사용 원본
+
+/* vertex.glsl
+#version 330 core
+layout(location = 0) in vec3 position;
+uniform mat4 modelTransform;
+uniform mat4 viewTransform;
+uniform mat4 projectionTransform;
+void main(void)
+{
+    gl_Position = projectionTransform * viewTransform * modelTransform * vec4(position, 1.0);
+}
+*/
+
+/* fragment.glsl
+#version 330 core
+uniform vec3 uColor;
+out vec4 FragColor;
+void main(void)
+{
+    FragColor = vec4(uColor, 1.0);
+}
+*/
