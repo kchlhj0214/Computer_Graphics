@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="소스 파일">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="헤더 파일">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="리소스 파일">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="셰이더 파일">
+      <UniqueIdentifier>{5da7b528-5cf4-4a31-8c6b-285e25b29a77}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ComG_1_31.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="fragment.glsl">
+      <Filter>셰이더 파일</Filter>
+    </None>
+    <None Include="vertex.glsl">
+      <Filter>셰이더 파일</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="stb_image.h"><Filter>헤더 파일</Filter></ClInclude>
+    <None Include="cats.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="cubemap_bg_hd.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="plane_bg.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="고양이 인생, 힘이 든다.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="다운로드 (2).jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="다운로드.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="에베베베베ㅔ베ㅔ베벱.jpeg"><Filter>리소스 파일</Filter></None>
+    <None Include="이달의 소녀(LOOΠΔ) (@loonatheworld) on X.jpeg"><Filter>리소스 파일</Filter></None>
+  </ItemGroup>
+</Project>
